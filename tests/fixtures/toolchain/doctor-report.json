@@ -1,0 +1,22 @@
+{
+  "_provenance": "Reviewed golden for test_doctor_json_envelope_is_versioned: a Linux host with sentinel xelatex/biber/kpsewhich/perl/curl/tar/xz on PATH, a fake runner whose xelatex banner says TeX Live 2025 and whose biber never exits; every later lookup succeeds and df returns nothing parseable. Only ids, order, and statuses are compared.",
+  "version": 1,
+  "checks": [
+    { "id": "terse.version", "status": "info" },
+    { "id": "toolchain.source", "status": "ok" },
+    { "id": "config.engine", "status": "ok" },
+    { "id": "xelatex.present", "status": "ok" },
+    { "id": "xelatex.runs", "status": "ok" },
+    { "id": "biber.present", "status": "ok" },
+    { "id": "biber.runs", "status": "fail" },
+    { "id": "kpsewhich.runs", "status": "ok" },
+    { "id": "packages.resolvable", "status": "ok" },
+    { "id": "fonts.resolvable", "status": "ok" },
+    { "id": "babel.languages", "status": "ok" },
+    { "id": "prerequisites", "status": "ok" },
+    { "id": "macos.quarantine", "status": "info" },
+    { "id": "disk.space", "status": "info" },
+    { "id": "poppler.tools", "status": "info" },
+    { "id": "compile.micro", "status": "info" }
+  ]
+}

@@ -1,0 +1,9 @@
+format-version = 1
+
+[project]
+entry = "paper.trs"
+output = "build"
+
+[themes]
+academic = "themes/academic.theme"
+magalu = "themes/magalu.theme"

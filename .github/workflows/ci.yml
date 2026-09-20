@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine-free:
+    name: engine-free (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace --locked
+      - run: cargo test --workspace --locked
+
+  heavy-tex:
+    name: heavy TeX lane (pinned Linux, provisioned by terse toolchain install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # The image is the only step allowed to use the network: it runs
+      # `terse toolchain install` against the frozen TeX Live 2025 repository
+      # pinned in crates/terse-core/profiles/toolchain-texlive-2025.toml.
+      # Its cache key is the content of the Dockerfile and that profile, so a
+      # repin rebuilds it and nothing else does.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tests/toolchain/Dockerfile
+          tags: terse-toolchain:ci
+          load: true
+          cache-from: type=gha,scope=toolchain-${{ hashFiles('tests/toolchain/Dockerfile', 'crates/terse-core/profiles/toolchain-texlive-2025.toml', 'Cargo.lock') }}
+          cache-to: type=gha,mode=max,scope=toolchain-${{ hashFiles('tests/toolchain/Dockerfile', 'crates/terse-core/profiles/toolchain-texlive-2025.toml', 'Cargo.lock') }}
+      # Cargo dependencies are fetched into a host-mounted CARGO_HOME before
+      # the network is disabled, so `--locked` builds succeed offline. The
+      # container gets its own target directory so host-built artifacts
+      # never mix with the image's Linux build.
+      - run: docker run --rm -v "$PWD":/work -w /work -e CARGO_HOME=/work/.docker-cargo-home terse-toolchain:ci cargo fetch --locked
+      # Acceptance networking is disabled after provisioning: no test in this
+      # lane may make a real network call. `scripts/test-tex.sh` preflights
+      # with `terse doctor`, runs the smoke build, then the ignored e2e suite.
+      - run: docker run --rm --network none -v "$PWD":/work -w /work -e CARGO_HOME=/work/.docker-cargo-home -e CARGO_TARGET_DIR=/work/.docker-target -e CARGO_NET_OFFLINE=true terse-toolchain:ci scripts/test-tex.sh
+      # The relocatable archive used by offline-install tests and by anyone
+      # reproducing the environment without the repository.
+      - run: docker run --rm --network none -v "$PWD":/work -w /work terse-toolchain:ci terse toolchain status --archive /work/managed-prefix.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: managed-prefix-texlive-2025
+          path: managed-prefix.tar.gz
+          retention-days: 14

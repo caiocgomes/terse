@@ -1,0 +1,33 @@
+// Demonstration "magalu" theme: clearly unofficial, used only to show
+// presentation separation between two themes. No real corporate identity,
+// private fonts, or credentials are involved; the logo is an original,
+// redistributable placeholder mark bundled with this fixture.
+
+page:
+  size: a4
+  margin: 2cm
+  columns: 1
+
+body:
+  font: tex-gyre-heros
+  color: #000000
+
+figure:
+  align: center
+  default-width: 80%
+  placement: here
+
+figure[role=wide]:
+  default-width: 100%
+
+citation:
+  style: numeric
+
+watermark:
+  kind: internal-use
+  opacity: 0.08
+  angle: 45
+
+logo:
+  source: assets/logo.png
+  width: 25%

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2301.12345v2</id>
+    <published>2023-01-30T18:00:00Z</published>
+    <title>An Example Paper</title>
+    <summary>An example abstract.</summary>
+    <author><name>Jane Doe</name></author>
+  </entry>
+</feed>

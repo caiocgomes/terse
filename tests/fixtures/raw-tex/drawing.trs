@@ -1,0 +1,9 @@
+document:
+  title: "A Drawing"
+
+A simple triangle, drawn with the declared local `tikz` support.
+
+tex:
+  \begin{tikzpicture}
+    \draw (0,0) -- (2,0) -- (1,1.5) -- cycle;
+  \end{tikzpicture}

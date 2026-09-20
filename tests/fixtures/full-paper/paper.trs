@@ -1,0 +1,49 @@
+document:
+  title: "A Complete Terse Paper"
+  subtitle: "Every MVP element, exercised end to end"
+  authors:
+    - name: "Ada Lovelace"
+      affiliation: "Analytical Engines Ltd"
+    - name: "Grace Hopper"
+      affiliation: "Naval Computing Group"
+  date: "2026-01-01"
+  language: "en"
+  abstract:
+    This fixture paper cites @turing1936 and @shannon1948, and cross-references
+    both an earlier included section and a later one.
+  keywords: ["compilers", "typesetting", "acceptance testing"]
+
+refs:
+  turing1936: doi:10.1000/turing-1936
+  shannon1948: arxiv:2301.12345
+
+include "background.trs"
+
+# Discussion
+
+A paragraph with a footnote^[an aside] and a forward reference to
+{ref: eq-euler}, defined later in this document. Emphasis is *italic*,
+strength is **bold**, and here is `inline code`. See the
+[Terse project](https://example.org/terse) for more.
+
+- first unordered item
+- second unordered item
+
+1. first ordered item
+2. second ordered item
+
+table [id: tbl-results]:
+  caption: "Summary of results"
+  header: ["Metric", "Value"]
+  rows:
+    - ["Accuracy", "0.97"]
+    - ["Latency", "12ms"]
+
+theorem [id: thm-main]:
+  For every well-formed Terse document, compilation is deterministic.
+
+proof [of: thm-main]:
+  This follows directly from the effect-free core described in
+  [@turing1936, p. 12] and the closed grammar in @shannon1948.
+
+include "results.trs"

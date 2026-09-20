@@ -1,0 +1,28 @@
+[package]
+name = "terse-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "terse"
+path = "src/main.rs"
+
+[dependencies]
+terse-core = { path = "../terse-core" }
+clap = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+notify = { workspace = true }
+sha2 = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
+reqwest = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+
+[dev-dependencies]
+filetime = "0.2"

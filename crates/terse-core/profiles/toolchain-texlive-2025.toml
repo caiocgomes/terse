@@ -1,0 +1,114 @@
+# Versioned provisioning profile for the managed TeX toolchain. This file is
+# a static, hand-pinned statement of WHERE a reproducible TeX Live for the
+# export profile `texlive-2025-xelatex` comes from and WHICH packages it
+# needs. It is embedded at compile time, never fetched or refreshed at
+# runtime; a new toolchain generation gets a new file and name.
+#
+# It is deliberately separate from `texlive-2025-xelatex.toml`: that file
+# states what the arXiv-compatible environment provides; this one states how
+# Terse provisions such an environment on a user's machine.
+
+schema-version = 1
+texlive-year = "2025"
+export-profile = "texlive-2025-xelatex"
+
+# Frozen end-of-series repository for TeX Live 2025. `install-tl` from the
+# main mirrors installs the CURRENT year (2026 at the time of pinning), which
+# is exactly the unattended upgrade this profile exists to avoid. The list is
+# ordered; the installer tries each mirror in turn. Mirrors are added only
+# after verifying their TLS certificate and byte-identical containers
+# (ftp.tug.org failed hostname verification on 2026-09-20 and is excluded).
+repositories = [
+    "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final/",
+]
+
+# The repository's own installer (the last one of the 2025 series, frozen
+# 2026-03-01, top-level directory `install-tl-20260301/`, banner
+# "TeX Live version 2025"). The SHA-512 is the value PUBLISHED next to the
+# archive as `install-tl-unx.tar.gz.sha512` (GPG-signed as `.sha512.asc`),
+# verified against a fresh download on 2026-09-20. Terse verifies this
+# digest before executing anything from the archive.
+[install-tl.unix]
+url = "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final/install-tl-unx.tar.gz"
+sha512 = "a307d7d11bcbd1f054ad0b0d476f7f12bc1a40d07445020edef8713b44453831d18a2f1722c3d2b0ea2e4fe6c06183a79d1c4049495113f412a9f5a570a8614d"
+
+# Package closure installed with `tlmgr install` after `scheme-infraonly`.
+#
+# `derived` is the exact set of packages owning every file XeLaTeX recorded
+# (`-recorder` INPUT lines under texmf-dist) while compiling
+# tests/fixtures/full-paper under the academic theme, the magalu theme, and
+# the magalu theme with `language: pt-BR`, mapped through texlive.tlpdb.
+# Regenerate it with scripts/derive-toolchain-closure.sh; never edit it by
+# hand. Two members of this list were missing from the first hand-written
+# seed and surfaced only by compiling: `unicode-math` (required by
+# `libertinus-otf.sty`) and `amsfonts` (Computer Modern math metrics under a
+# non-OTF-math theme).
+#
+# `manual` lists what the recorder cannot observe: the base scheme, the
+# engine and format packages, the Biber binary, hyphenation patterns loaded
+# at format-generation time, font files opened by the output driver rather
+# than by TeX, and the built-in `tikz` support (`pgf`) for raw-TeX builds.
+[closure]
+derived-from = "tests/fixtures/full-paper: academic, magalu, magalu with language pt-BR; 2026-09-20"
+derived = [
+    "amscls",
+    "amsfonts",
+    "amsmath",
+    "babel",
+    "babel-english",
+    "babel-portuges",
+    "biblatex",
+    "bigintcalc",
+    "bitset",
+    "booktabs",
+    "cm",
+    "enumitem",
+    "eso-pic",
+    "etoolbox",
+    "fontspec",
+    "gettitlestring",
+    "graphics",
+    "graphics-cfg",
+    "graphics-def",
+    "hycolor",
+    "hyperref",
+    "iftex",
+    "infwarerr",
+    "intcalc",
+    "kpathsea",
+    "kvdefinekeys",
+    "kvoptions",
+    "kvsetkeys",
+    "l3backend",
+    "l3kernel",
+    "l3packages",
+    "latex",
+    "libertinus-otf",
+    "logreq",
+    "ltxcmds",
+    "pdfescape",
+    "pdftexcmds",
+    "refcount",
+    "rerunfilecheck",
+    "stringenc",
+    "tex-gyre",
+    "unicode-data",
+    "unicode-math",
+    "uniquecounter",
+    "url",
+    "xcolor",
+    "xkeyval",
+    "zapfding",
+]
+manual = [
+    "scheme-infraonly",
+    "xetex",
+    "latex-bin",
+    "biber",
+    "hyphen-english",
+    "hyphen-portuguese",
+    "libertinus-fonts",
+    "lm",
+    "lm-math",
+    "pgf",
+]

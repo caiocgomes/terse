@@ -1,0 +1,7 @@
+## Results [id: sec-results]
+
+Building on {ref: sec-background}, this section states the closing
+identity referenced earlier in the paper.
+
+math [id: eq-euler]:
+  e^{i \pi} + 1 = 0

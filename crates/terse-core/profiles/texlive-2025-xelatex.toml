@@ -1,0 +1,57 @@
+# Versioned offline export compatibility profile. This file is a static,
+# hand-authored statement of what a specific external toolchain generation
+# is assumed to provide -- it is never fetched or refreshed at runtime; a
+# new toolchain generation gets a new profile file and name, never a
+# silent edit of this one's guarantees.
+#
+# "texlive-2025-xelatex" describes: XeLaTeX from a TeX Live 2025
+# distribution, using biber/biblatex for citation processing, with the
+# package/font/locale set every document Terse can currently generate
+# actually depends on (see crates/terse-core/src/latex/mod.rs for the
+# authoritative list this profile must stay in sync with).
+
+name = "texlive-2025-xelatex"
+engine = "xelatex"
+bibliography-backend = "biber"
+# The TeX Live distribution year this profile's guarantees describe.
+# Used only to distinguish an honest "compiled-local" report (compiled
+# with whatever XeLaTeX/Biber happen to be on PATH, generation unknown or
+# different) from "compiled-profile" (the detected local `xelatex
+# --version` banner names this same year) -- never fetched or compared
+# against any live registry.
+texlive-year = "2025"
+
+# Every package name `terse-style.sty` can ever `\RequirePackage`: the
+# always-loaded core set, the conditionally-loaded bibliography set, the
+# conditionally-loaded watermark set, and the closed built-in registry
+# from `latex::BUILTIN_PACKAGES`. This list must equal
+# `latex::STYLE_PACKAGES` as a set (a unit test enforces it): a package the
+# generator never emits would make `compiled-profile` vouch for something
+# it never checked.
+packages = [
+    "fontspec",
+    "amsmath",
+    "amsthm",
+    "graphicx",
+    "booktabs",
+    "enumitem",
+    "hyperref",
+    "babel",
+    "biblatex",
+    "eso-pic",
+    "tikz",
+]
+
+# Every font PACKAGE NAME a theme's `body.font` token can currently
+# resolve to via `latex::font_package_for` (three mapped tokens, plus
+# `libertinus-otf`, which passes through unmapped today).
+fonts = [
+    "tgheros",
+    "tgpagella",
+    "lmodern",
+    "libertinus-otf",
+]
+
+# Every `language` metadata value Terse's semantic lowering accepts,
+# mapped through `latex::babel_language_for`.
+babel-languages = ["en", "pt-BR"]

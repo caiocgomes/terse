@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "texlive_year": "2025",
+  "repository": "https://example.invalid/historic/systems/texlive/2025/tlnet-final/",
+  "install_tl_sha512": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "packages": [
+    {
+      "name": "scheme-infraonly",
+      "revision": "0"
+    },
+    {
+      "name": "xetex",
+      "revision": "0"
+    }
+  ],
+  "terse_version": "0.0.0-fixture",
+  "platform": "fake-platform"
+}

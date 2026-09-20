@@ -1,0 +1,71 @@
+# Committed, reproducible lock for the full-paper acceptance fixture.
+#
+# Hand-authored (not fetched live) matching the exact `LockEntry`/
+# `NormalizedRecord` schema in crates/terse-core/src/references/{lock,record}.rs
+# (group 13) and the field shapes group 14's CSL-JSON/Atom fixtures
+# normalize into, so this fixture never needs network access to build.
+lock-version = 1
+normalization-version = 1
+
+[entries.turing1936.declared]
+provider = "doi"
+identifier = "10.1000/turing-1936"
+
+[entries.turing1936.resolved]
+provider = "doi"
+identifier = "10.1000/turing-1936"
+
+[entries.turing1936.adapter]
+name = "doi"
+version = "1"
+
+[entries.turing1936.provider_data]
+title = "On Computable Numbers, with an Application to the Entscheidungsproblem"
+work_type = "journal-article"
+authors = [{ form = "structured", family = "Turing", given = "Alan" }]
+editors = []
+anonymous = false
+container = "Proceedings of the London Mathematical Society"
+date = "1936"
+publisher = "London Mathematical Society"
+volume = "42"
+
+[entries.turing1936.effective]
+title = "On Computable Numbers, with an Application to the Entscheidungsproblem"
+work_type = "journal-article"
+authors = [{ form = "structured", family = "Turing", given = "Alan" }]
+editors = []
+anonymous = false
+container = "Proceedings of the London Mathematical Society"
+date = "1936"
+publisher = "London Mathematical Society"
+volume = "42"
+
+[entries.shannon1948.declared]
+provider = "arxiv"
+identifier = "2301.12345"
+
+[entries.shannon1948.resolved]
+provider = "arxiv"
+identifier = "2301.12345"
+version = "2"
+
+[entries.shannon1948.adapter]
+name = "arxiv"
+version = "1"
+
+[entries.shannon1948.provider_data]
+title = "A Mathematical Theory of Communication"
+work_type = "preprint"
+authors = [{ form = "structured", family = "Shannon", given = "Claude" }]
+editors = []
+anonymous = false
+date = "2023-01-30"
+
+[entries.shannon1948.effective]
+title = "A Mathematical Theory of Communication"
+work_type = "preprint"
+authors = [{ form = "structured", family = "Shannon", given = "Claude" }]
+editors = []
+anonymous = false
+date = "2023-01-30"

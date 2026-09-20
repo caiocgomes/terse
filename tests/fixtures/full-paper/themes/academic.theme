@@ -1,0 +1,26 @@
+// Public demonstration theme: conventional single-column academic paper.
+// No private/corporate dependencies; every value resolves to a
+// TeX-distributed font and a compiler-owned watermark label.
+
+page:
+  size: a4
+  margin: 2.5cm
+  columns: 1
+
+body:
+  font: libertinus-otf
+  color: #000000
+
+figure:
+  align: center
+  default-width: 75%
+  placement: here
+
+figure[role=wide]:
+  default-width: 100%
+
+citation:
+  style: author-year
+
+watermark:
+  kind: none

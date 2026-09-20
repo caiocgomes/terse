@@ -1,0 +1,17 @@
+selected_scheme scheme-infraonly
+TEXDIR /staging
+TEXMFSYSCONFIG /staging/texmf-config
+TEXMFSYSVAR /staging/texmf-var
+TEXMFLOCAL /staging/texmf-local
+TEXMFHOME /data/texmf/home
+TEXMFVAR /data/texmf/var
+TEXMFCONFIG /data/texmf/config
+instopt_portable 1
+instopt_adjustpath 0
+instopt_letter 0
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+tlpdbopt_autobackup 0
+tlpdbopt_desktop_integration 0
+tlpdbopt_file_assocs 0
+tlpdbopt_post_code 1

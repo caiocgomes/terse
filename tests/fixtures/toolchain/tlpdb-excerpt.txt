@@ -1,0 +1,70 @@
+# Excerpt of texlive.tlpdb from the frozen TeX Live 2025 repository
+# (ftp.math.utah.edu .../texlive/2025/tlnet-final/tlpkg/texlive.tlpdb, 2026-09-20).
+# Three records kept verbatim except that long descriptions and catalogue
+# lines are removed. Exercises: RELOC/ relocation, runfiles vs docfiles/srcfiles,
+# a TLCore package with binfiles per architecture, and 'details=' suffixes.
+
+name booktabs
+category Package
+revision 77677
+shortdesc Publication quality tables in LaTeX
+relocated 1
+containersize 2208
+doccontainersize 295880
+docfiles size=74
+ RELOC/doc/latex/booktabs/README details="Readme"
+ RELOC/doc/latex/booktabs/booktabs.pdf details="Package documentation (English)" language="en"
+srccontainersize 14648
+srcfiles size=12
+ RELOC/source/latex/booktabs/booktabs.dtx
+ RELOC/source/latex/booktabs/booktabs.ins
+runfiles size=2
+ RELOC/tex/latex/booktabs/booktabs.sty
+
+name hyphen-portuguese
+category TLCore
+revision 74203
+shortdesc Portuguese hyphenation patterns.
+relocated 1
+depend hyph-utf8
+depend hyphen-base
+execute AddHyphen 	name=portuguese synonyms=portuges 	lefthyphenmin=2 	righthyphenmin=3 	file=loadhyph-pt.tex 	file_patterns=hyph-pt.pat.txt 	file_exceptions=hyph-pt.hyp.txt
+containersize 3768
+runfiles size=6
+ RELOC/tex/generic/hyph-utf8/loadhyph/loadhyph-pt.tex
+ RELOC/tex/generic/hyph-utf8/patterns/ptex/hyph-pt.ec.tex
+ RELOC/tex/generic/hyph-utf8/patterns/tex/hyph-pt.tex
+ RELOC/tex/generic/hyph-utf8/patterns/txt/hyph-pt.hyp.txt
+ RELOC/tex/generic/hyph-utf8/patterns/txt/hyph-pt.pat.txt
+
+name biber
+category Package
+revision 75738
+shortdesc A BibTeX replacement for users of BibLaTeX
+depend biber.ARCH
+containersize 736
+doccontainersize 268548
+docfiles size=67
+ texmf-dist/doc/bibtex/biber/biber.pdf details="Manual"
+srccontainersize 988388
+srcfiles size=311
+ texmf-dist/source/bibtex/biber/Changes
+ texmf-dist/source/bibtex/biber/README.biber-cygwin
+ texmf-dist/source/bibtex/biber/README.biber-freebsd
+ texmf-dist/source/bibtex/biber/README.biber-linux
+ texmf-dist/source/bibtex/biber/README.biber-linux-aarch64
+ texmf-dist/source/bibtex/biber/README.biber-linux-musl
+ texmf-dist/source/bibtex/biber/README.biber-macos
+ texmf-dist/source/bibtex/biber/README.biber-windows
+ texmf-dist/source/bibtex/biber/README.md
+ texmf-dist/source/bibtex/biber/biblatex-biber.tar.gz
+ texmf-dist/source/bibtex/biber/utf8-macro-map.html
+
+name biber.universal-darwin
+category Package
+revision 75738
+shortdesc universal-darwin files of biber
+containersize 69739628
+binfiles arch=universal-darwin size=20307
+ bin/universal-darwin/biber
+

@@ -1,0 +1,12 @@
+{
+  "DOI": "10.1000/abc",
+  "title": "Example & Title",
+  "type": "journal-article",
+  "author": [{"family": "Doe", "given": "Jane"}],
+  "container-title": "Journal of Examples",
+  "issued": {"date-parts": [[2024, 3]]},
+  "publisher": "Example Press",
+  "volume": "12",
+  "issue": "3",
+  "page": "1-10"
+}

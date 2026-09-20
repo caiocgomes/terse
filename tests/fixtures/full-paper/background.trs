@@ -1,0 +1,9 @@
+# Background [id: sec-background]
+
+Terse compiles a small structured document language to LaTeX. This
+section introduces the running example figure referenced throughout the
+paper.
+
+figure "figure.png" [id: fig-example, role: wide]:
+  caption: "An example figure"
+  alt: "A tiny placeholder image used across fixtures"

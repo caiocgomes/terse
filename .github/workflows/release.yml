@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  package:
+    name: package (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --workspace --locked --release --target ${{ matrix.target }}
+      # Smoke-test only when the target matches the runner's own host
+      # (no emulation is set up here); cross-target binaries are built but
+      # not executed by this workflow.
+      - name: smoke test (host target only)
+        if: contains(matrix.target, 'linux') && runner.os == 'Linux' || contains(matrix.target, 'darwin') && runner.os == 'macOS' || contains(matrix.target, 'windows') && runner.os == 'Windows'
+        shell: bash
+        run: |
+          BIN="target/${{ matrix.target }}/release/terse"
+          [ -f "${BIN}.exe" ] && BIN="${BIN}.exe"
+          "$BIN" init /tmp/release-smoke
+          "$BIN" check /tmp/release-smoke
+          "$BIN" build --tex-only /tmp/release-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terse-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/terse
+            target/${{ matrix.target }}/release/terse.exe
+          if-no-files-found: ignore
+
+  # Artifacts are prepared and uploaded to the workflow run above; nothing
+  # here publishes them automatically (no GitHub Release is created, no
+  # registry is pushed to). A maintainer downloads and publishes manually.
