@@ -23,10 +23,44 @@ impl SourceSpan {
     }
 }
 
+/// The largest single `.trs`/`.theme` source the compiler will load, in
+/// bytes. A structured document source is prose plus markup: the complete
+/// multi-file acceptance fixture is under 10 KiB, and a book-length work
+/// split across modules stays far below this per file. 4 MiB is therefore
+/// several orders of magnitude above any authored document while still
+/// bounding what a single malformed or hostile input can make the
+/// compiler allocate, decode, and index before any parsing begins.
+pub const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
     InvalidUtf8,
     BareCr { byte_offset: u32 },
+    TooLarge { bytes: usize, limit: usize },
+}
+
+impl SourceError {
+    /// Renders this load failure as a diagnostic against `file_id`. The
+    /// span is empty: nothing inside a file that failed to load can be
+    /// pointed at, and inventing an offset would be a fabricated position.
+    pub fn into_diagnostic(self, file_id: FileId) -> crate::diagnostic::Diagnostic {
+        let span = SourceSpan::new(file_id, 0, 0);
+        match self {
+            SourceError::InvalidUtf8 => {
+                crate::diagnostic::Diagnostic::error("E-SOURCE-001", "source is not valid UTF-8", span)
+            }
+            SourceError::BareCr { byte_offset } => crate::diagnostic::Diagnostic::error(
+                "E-SOURCE-002",
+                "source contains a bare carriage return; use LF or CRLF line endings",
+                SourceSpan::new(file_id, byte_offset, byte_offset),
+            ),
+            SourceError::TooLarge { bytes, limit } => crate::diagnostic::Diagnostic::error(
+                "E-LIMIT-003",
+                format!("source is {bytes} bytes, exceeding the {limit}-byte per-file limit"),
+                span,
+            ),
+        }
+    }
 }
 
 /// A single loaded `.trs`/`.theme` file: its original bytes, decoded text,
@@ -44,6 +78,15 @@ pub struct SourceFile {
 
 impl SourceFile {
     pub fn new(id: FileId, path: impl Into<String>, bytes: Vec<u8>) -> Result<Self, SourceError> {
+        // Checked before decoding: this is the single chokepoint where
+        // bytes enter the compiler core, so refusing here bounds every
+        // later stage without each of them needing its own guard.
+        if bytes.len() > MAX_SOURCE_BYTES {
+            return Err(SourceError::TooLarge {
+                bytes: bytes.len(),
+                limit: MAX_SOURCE_BYTES,
+            });
+        }
         let (had_bom, rest) = strip_bom(&bytes);
         let base_offset = (bytes.len() - rest.len()) as u32;
         let text = std::str::from_utf8(rest)

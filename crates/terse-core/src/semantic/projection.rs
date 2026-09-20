@@ -14,13 +14,19 @@
 //! not incidental. What's excluded is furniture the compiler derives
 //! (page numbers, contents, watermarks) and presentation-only settings.
 
+use std::collections::BTreeMap;
+
 use super::{Author, DocumentMetadata, ListItem, Node, NodeKind, ParsedModule};
+use crate::references::record::NormalizedRecord;
 use crate::syntax::inlines::Inline;
 use sha2::{Digest, Sha256};
 
 /// Bumped whenever the projection's shape changes in a way that would
-/// change an existing digest for unchanged authored content.
-pub const PROJECTION_VERSION: u32 = 1;
+/// change an existing digest for unchanged authored content. Version 2
+/// added the effective bibliography records: before it, two documents
+/// whose cited works carried different locked metadata digested
+/// identically, which called materially different papers equal.
+pub const PROJECTION_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedMetadata {
@@ -60,6 +66,12 @@ pub struct Projection {
     pub version: u32,
     pub metadata: Option<ProjectedMetadata>,
     pub blocks: Vec<ProjectedNode>,
+    /// Every authorized alias's effective record. The bibliography a
+    /// reader sees is authored meaning, not presentation: two documents
+    /// with identical prose citing works whose locked metadata differs
+    /// are different documents. A `BTreeMap` of already-`Debug` records
+    /// keeps [`digest`] deterministic.
+    pub references: BTreeMap<String, NormalizedRecord>,
 }
 
 fn project_node(node: &Node) -> ProjectedNode {
@@ -127,11 +139,15 @@ fn project_metadata(metadata: &DocumentMetadata) -> ProjectedMetadata {
 
 /// Projects a lowered module into its canonical, theme-invariant form.
 /// Pure and effect-free: no I/O, no spans, no incidental furniture.
-pub fn project(module: &ParsedModule) -> Projection {
+pub fn project(
+    module: &ParsedModule,
+    references: &BTreeMap<String, NormalizedRecord>,
+) -> Projection {
     Projection {
         version: PROJECTION_VERSION,
         metadata: module.metadata.as_ref().map(project_metadata),
         blocks: module.blocks.iter().map(project_node).collect(),
+        references: references.clone(),
     }
 }
 

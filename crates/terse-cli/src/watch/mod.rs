@@ -218,6 +218,7 @@ fn run_attempt_with_hook(
         &extra_packages,
         &all_files,
         &cited,
+        &plan.file_paths,
     ) {
         Ok(m) => m,
         Err(terse_core::artifact::SupportFileCollision(name)) => {
@@ -659,6 +660,19 @@ mod tests {
 
         assert_eq!(outcome.report.status, AttemptStatus::Superseded);
         assert!(!root.join("build/academic").exists());
+
+        // The scenario has a second half that went unasserted: the stale
+        // attempt is not published *and* a successor processes the updated
+        // snapshot. Without this, an implementation that superseded every
+        // attempt forever -- never publishing anything again -- would pass.
+        let successor = run_attempt_with_hook(&project, &entry_path, &options, None, &mut runner, &mut || {});
+        assert_eq!(successor.report.status, AttemptStatus::Success);
+        let published = std::fs::read_to_string(root.join("build/academic/paper.tex"))
+            .expect("the successor publishes");
+        assert!(
+            published.contains("Edited Mid-Build"),
+            "the successor must process the edit that superseded its predecessor, got:\n{published}"
+        );
     }
 
     #[allow(dead_code)]

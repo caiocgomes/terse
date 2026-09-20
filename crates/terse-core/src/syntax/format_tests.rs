@@ -14,7 +14,7 @@ fn project_str(text: &str) -> projection::Projection {
     let lines = lexer::lex_lines(f.text()).unwrap();
     let blocks = blocks::parse_module(&lines, f.text(), f.id, f.base_offset()).unwrap();
     let module = semantic::lower(blocks, f.id).unwrap();
-    projection::project(&module)
+    projection::project(&module, &std::collections::BTreeMap::new())
 }
 
 #[test]

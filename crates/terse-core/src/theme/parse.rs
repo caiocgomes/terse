@@ -18,6 +18,10 @@ pub struct RawProperty {
 pub struct RawRule {
     pub component: String,
     pub role: Option<String>,
+    /// Which attribute key introduced [`role`], from the closed set
+    /// `{role, kind}`. The grammar layer records it; deciding *which* key a
+    /// given component accepts is a schema question, so `resolve` owns it.
+    pub role_key: Option<&'static str>,
     pub properties: Vec<RawProperty>,
     pub selector_span: SourceSpan,
 }
@@ -105,7 +109,7 @@ pub fn parse(source: &SourceFile) -> Result<Vec<RawRule>, ThemeParseError> {
             if rule.properties.iter().any(|p| p.name == name) {
                 return Err(ThemeParseError::DuplicateProperty {
                     span: span_of(prop_start, content_len),
-                    selector: selector_text(&rule.component, &rule.role),
+                    selector: selector_text(&rule.component, rule.role_key, &rule.role),
                     property: name.to_string(),
                 });
             }
@@ -123,13 +127,14 @@ pub fn parse(source: &SourceFile) -> Result<Vec<RawRule>, ThemeParseError> {
             });
         }
 
-        // Selector line: `component:` or `component[role=value]:`.
+        // Selector line: `component:`, `component[role=value]:` or
+        // `component[kind=value]:`.
         let Some(head) = trimmed_end.strip_suffix(':') else {
             return Err(ThemeParseError::InvalidSelector {
                 span: span_of(0, content_len),
             });
         };
-        let (component, role) = match parse_selector_head(head) {
+        let (component, role_key, role) = match parse_selector_head(head) {
             Some(parts) => parts,
             None => {
                 return Err(ThemeParseError::InvalidSelector {
@@ -137,10 +142,10 @@ pub fn parse(source: &SourceFile) -> Result<Vec<RawRule>, ThemeParseError> {
                 })
             }
         };
-        let selector = selector_text(&component, &role);
+        let selector = selector_text(&component, role_key, &role);
         if rules
             .iter()
-            .any(|r| selector_text(&r.component, &r.role) == selector)
+            .any(|r| selector_text(&r.component, r.role_key, &r.role) == selector)
         {
             return Err(ThemeParseError::DuplicateSelector {
                 span: span_of(0, content_len),
@@ -149,6 +154,7 @@ pub fn parse(source: &SourceFile) -> Result<Vec<RawRule>, ThemeParseError> {
         }
         rules.push(RawRule {
             component,
+            role_key,
             role,
             properties: Vec::new(),
             selector_span: span_of(0, content_len),
@@ -158,10 +164,10 @@ pub fn parse(source: &SourceFile) -> Result<Vec<RawRule>, ThemeParseError> {
     Ok(rules)
 }
 
-fn selector_text(component: &str, role: &Option<String>) -> String {
-    match role {
-        Some(r) => format!("{component}[role={r}]"),
-        None => component.to_string(),
+fn selector_text(component: &str, role_key: Option<&str>, role: &Option<String>) -> String {
+    match (role_key, role) {
+        (Some(key), Some(r)) => format!("{component}[{key}={r}]"),
+        _ => component.to_string(),
     }
 }
 
@@ -185,21 +191,28 @@ fn is_role_value(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// Accepts exactly `component` or `component[role=value]`; anything else
-/// (per-ID `#foo`, combinators `>`/`+`/`~`, multiple comma-separated
-/// selectors, conditions, imports, `@` directives) is rejected here.
-fn parse_selector_head(head: &str) -> Option<(String, Option<String>)> {
+/// The closed set of selector attribute keys. `role` distinguishes a
+/// semantic role of the same component (`figure[role=wide]`); `kind`
+/// distinguishes one member of a closed family (`theorem[kind=lemma]`).
+const SELECTOR_ATTRIBUTES: [&str; 2] = ["role", "kind"];
+
+/// Accepts exactly `component`, `component[role=value]` or
+/// `component[kind=value]`; anything else (per-ID `#foo`, combinators
+/// `>`/`+`/`~`, multiple comma-separated selectors, conditions, imports,
+/// `@` directives) is rejected here.
+fn parse_selector_head(head: &str) -> Option<(String, Option<&'static str>, Option<String>)> {
     if let Some(bracket_start) = head.find('[') {
         let component = &head[..bracket_start];
         let attr = head.strip_prefix(component)?.strip_prefix('[')?;
         let attr = attr.strip_suffix(']')?;
         let (key, value) = attr.split_once('=')?;
-        if key != "role" || !is_component_name(component) || !is_role_value(value) {
+        let key = SELECTOR_ATTRIBUTES.iter().find(|k| **k == key)?;
+        if !is_component_name(component) || !is_role_value(value) {
             return None;
         }
-        Some((component.to_string(), Some(value.to_string())))
+        Some((component.to_string(), Some(*key), Some(value.to_string())))
     } else {
-        is_component_name(head).then(|| (head.to_string(), None))
+        is_component_name(head).then(|| (head.to_string(), None, None))
     }
 }
 

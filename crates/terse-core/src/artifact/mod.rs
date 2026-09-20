@@ -25,6 +25,7 @@ pub const RESERVED_GENERATED_NAMES: &[&str] = &[
     "references.bib",
     "COMPILE.txt",
     "build-manifest.json",
+    latex::source_map::SOURCE_MAP_FILE_NAME,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +47,8 @@ pub struct ArtifactManifest {
 /// `terse-style.sty`, an empty `references.bib` (no citations in this
 /// milestone), `COMPILE.txt`, and a `build-manifest.json` describing them.
 pub fn plan_source_artifacts(module: &ParsedModule, theme: &ResolvedTheme) -> ArtifactManifest {
-    plan_source_artifacts_with_support(module, theme, &[], &[], &BTreeMap::new()).expect("no support files declared")
+    plan_source_artifacts_with_support(module, theme, &[], &[], &BTreeMap::new(), &BTreeMap::new())
+        .expect("no support files declared")
 }
 
 /// Same as [`plan_source_artifacts`], additionally requiring declared
@@ -57,12 +59,18 @@ pub fn plan_source_artifacts(module: &ParsedModule, theme: &ResolvedTheme) -> Ar
 /// intersection of authored citations and bound reference aliases,
 /// computed by the caller) as `references.bib`. Rejects a support file
 /// whose logical path collides with a generated name.
+///
+/// `file_paths` maps each module's [`crate::source::FileId`] to its
+/// root-relative logical path, so `paper.map.json` can name its origins
+/// the way a reader would. The core never learns paths by itself; the
+/// application layer already holds this table and passes it in as data.
 pub fn plan_source_artifacts_with_support(
     module: &ParsedModule,
     theme: &ResolvedTheme,
     extra_packages: &[&str],
     support_files: &[(String, Vec<u8>)],
     cited: &BTreeMap<String, NormalizedRecord>,
+    file_paths: &BTreeMap<crate::source::FileId, String>,
 ) -> Result<ArtifactManifest, SupportFileCollision> {
     for (path, _) in support_files {
         if RESERVED_GENERATED_NAMES
@@ -78,10 +86,19 @@ pub fn plan_source_artifacts_with_support(
     } else {
         None
     };
+    // The mapped generator produces the same `paper.tex` bytes as the
+    // plain one (asserted in `source_map`'s own tests); taking the map
+    // here is what makes it a published deliverable rather than a
+    // capability that exists only in tests.
+    let (document, source_map) = latex::source_map::generate_document_with_map(module, theme);
     let mut files = vec![
         GeneratedFile {
             logical_path: "paper.tex".to_string(),
-            bytes: latex::generate_document(module, theme).into_bytes(),
+            bytes: document.into_bytes(),
+        },
+        GeneratedFile {
+            logical_path: latex::source_map::SOURCE_MAP_FILE_NAME.to_string(),
+            bytes: source_map.to_json(file_paths).into_bytes(),
         },
         GeneratedFile {
             logical_path: "terse-style.sty".to_string(),

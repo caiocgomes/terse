@@ -276,7 +276,14 @@ fn test_doctor_microcompile_reports_failure_distinctly() {
     // Version and lookup probes succeed; the micro-compile's biber pass
     // exits nonzero with a recognizable log line.
     let profile = terse_core::artifact::profile::resolve_profile("texlive-2025-xelatex").unwrap();
-    let lookups = 1 /* TEXMFDIST */ + profile.packages.len() + 4 /* fonts */ + 2 /* babel */;
+    // Derived, never hardcoded: the doctor probes every font *variant*
+    // `\setmainfont` can name, so a literal count here would silently
+    // desynchronize from the schema the way this change exists to fix.
+    let font_lookups = terse_cli::doctor::checks::FONT_FILES
+        .iter()
+        .filter(|(token, _)| profile.fonts.iter().any(|f| f == token))
+        .count();
+    let lookups = 1 /* TEXMFDIST */ + profile.packages.len() + font_lookups + 2 /* babel */;
     let mut responses = vec![
         ProcessOutcome::success_with_log(&b"XeTeX 3.14 (TeX Live 2025)\n"[..]),
         ProcessOutcome::success_with_log(&b"biber version: 2.21\n"[..]),

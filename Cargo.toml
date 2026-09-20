@@ -5,7 +5,15 @@ members = ["crates/terse-core", "crates/terse-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+# The toolchain this project is actually built and tested with, matching
+# `rust-toolchain.toml`, the release image and CI. It was `1.80` until
+# `close-verification-gaps` checked: that version cannot build the
+# workspace at all, because a transitive dependency (`rand_core 0.10.1`,
+# via reqwest/rustls) requires edition 2024 and therefore Cargo 1.85+. A
+# lower floor than the pin may well work, but nothing measures it, so
+# nothing claims it; the `msrv` CI job verifies this number rather than
+# leaving it as an assertion.
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }

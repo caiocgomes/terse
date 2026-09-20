@@ -66,6 +66,11 @@ pub struct ArtifactPlan {
     /// `.bib` generation) intersect this with
     /// [`semantic::collect_cited_aliases`].
     pub bindings: references::bind::Bindings,
+    /// Each compiled module's root-relative logical path, keyed by the
+    /// [`source::FileId`] its spans carry. Carried on the plan so the
+    /// artifact layer can name source-map origins without the core ever
+    /// touching a filesystem.
+    pub file_paths: std::collections::BTreeMap<source::FileId, String>,
 }
 
 /// Parses every module in the snapshot and expands `include`s starting
@@ -158,7 +163,20 @@ pub fn compile(snapshot: &InputSnapshot) -> (Vec<Diagnostic>, Option<ArtifactPla
         return (vec![diag], None);
     }
 
-    (Vec::new(), Some(ArtifactPlan { module, bindings }))
+    let mut file_paths = std::collections::BTreeMap::new();
+    file_paths.insert(snapshot.entry.id, snapshot.entry_key.clone());
+    for (key, file) in &snapshot.modules {
+        file_paths.insert(file.id, key.clone());
+    }
+
+    (
+        Vec::new(),
+        Some(ArtifactPlan {
+            module,
+            bindings,
+            file_paths,
+        }),
+    )
 }
 
 fn parse_source(file: &SourceFile) -> Result<Vec<TopBlock>, Diagnostic> {

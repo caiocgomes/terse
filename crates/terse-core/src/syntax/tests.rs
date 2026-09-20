@@ -18,6 +18,17 @@ fn try_parse_text(bytes: &[u8]) -> Result<ParsedModule, ()> {
     semantic::lower(module_blocks, file.id).map_err(|_| ())
 }
 
+/// Like [`try_parse_text`] but keeps the diagnostic instead of discarding
+/// it, so a test can assert *which* failure happened and *where* rather
+/// than only that something failed.
+fn try_parse_diagnostics(bytes: &[u8]) -> Result<ParsedModule, crate::diagnostic::Diagnostic> {
+    let file = SourceFile::new(FileId(0), "entry.trs", bytes.to_vec())
+        .expect("test inputs are valid UTF-8 without a bare CR");
+    let lines = lexer::lex_lines(file.text()).expect("these inputs are structurally well indented");
+    let module_blocks = blocks::parse_module(&lines, file.text(), file.id, file.base_offset())?;
+    semantic::lower(module_blocks, file.id)
+}
+
 fn node_text(node: &crate::semantic::Node) -> String {
     match &node.kind {
         NodeKind::Heading { inlines, .. } => plain_text(inlines),
@@ -252,15 +263,85 @@ fn test_mixed_inline_paragraph() {
 
 #[test]
 fn test_crossing_and_nested_delimiters_fail() {
-    let cases: [&[u8]; 5] = [
-        b"document:\n  title: \"T\"\n\n*emph [link*text](dest)\n",
-        b"document:\n  title: \"T\"\n\n^[outer ^[inner] still]\n",
-        b"document:\n  title: \"T\"\n\n`unterminated code\n",
-        b"document:\n  title: \"T\"\n\nAn unknown \\q escape.\n",
-        b"document:\n  title: \"T\"\n\nAn unescaped ***run*** here.\n",
+    // Each case must fail for its *own* reason, at the line that carries
+    // the offending delimiter. Asserting only `is_err()` let any one of
+    // these pass for any other's cause, so a single over-broad rejection
+    // would have looked like five working checks.
+    let cases: [(&[u8], &str, &str, &str); 8] = [
+        (
+            b"document:\n  title: \"T\"\n\n*emph [link*text](dest)\n",
+            "E-PARSE-050",
+            // Crossing delimiters surface as the emphasis span never
+            // closing before the link does, which is the real mechanism.
+            "unterminated emphasis span",
+            "*emph [link*text](dest)",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\n^[outer ^[inner] still]\n",
+            "E-PARSE-050",
+            "footnotes cannot nest",
+            "^[outer ^[inner] still]",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\n`unterminated code\n",
+            "E-PARSE-050",
+            "unterminated code span",
+            "`unterminated code",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\nAn unknown \\q escape.\n",
+            "E-PARSE-050",
+            "unknown backslash escape",
+            "An unknown \\q escape.",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\nAn unescaped ***run*** here.\n",
+            "E-PARSE-050",
+            "",
+            "An unescaped ***run*** here.",
+        ),
+        // Edge cases the scenario names and nothing asserted: the parser
+        // implements all three and no test could tell.
+        (
+            b"document:\n  title: \"T\"\n\nA [nested [inner](a)](b) link.\n",
+            "E-LINK-001",
+            "",
+            "A [nested [inner](a)](b) link.",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\nA [label ^[note]](dest) link.\n",
+            "E-LINK-001",
+            "",
+            "A [label ^[note]](dest) link.",
+        ),
+        (
+            b"document:\n  title: \"T\"\n\nA [label](dest with space) link.\n",
+            "E-PARSE-050",
+            "",
+            "A [label](dest with space) link.",
+        ),
     ];
-    for src in cases {
-        assert!(try_parse_text(src).is_err(), "expected failure for {src:?}");
+    for (src, expected_code, expected_message, offending_line) in cases {
+        let text = std::str::from_utf8(src).unwrap();
+        let diagnostic = match try_parse_diagnostics(src) {
+            Err(d) => d,
+            Ok(_) => panic!("expected failure for {text:?}"),
+        };
+        assert_eq!(
+            diagnostic.code, expected_code,
+            "wrong diagnostic code for {text:?}"
+        );
+        assert!(
+            diagnostic.message.contains(expected_message),
+            "message {:?} must identify the cause {expected_message:?} for {text:?}",
+            diagnostic.message
+        );
+        let span = diagnostic.primary.expect("an inline failure has a position");
+        assert_eq!(
+            &text[span.byte_start as usize..span.byte_end as usize],
+            offending_line,
+            "diagnostic must point at the line carrying the delimiter, for {text:?}"
+        );
     }
 
     // Escaped delimiter text is accepted.

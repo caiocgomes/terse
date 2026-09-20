@@ -112,7 +112,11 @@ fn render_node(node: &Node, symbols: &SymbolTable, out: &mut String) {
             } else {
                 "\\TerseFigureWidth"
             };
-            out.push_str(&format!("\\begin{{{env}}}[htbp]\n\\centering\n"));
+            // No placement argument and no literal alignment: both are
+            // theme settings now, applied by `terse-style.sty` through
+            // `\fps@figure` and `\TerseFigureAlign`, so this file's bytes
+            // stay identical under every theme.
+            out.push_str(&format!("\\begin{{{env}}}\n\\TerseFigureAlign\n"));
             out.push_str(&format!(
                 "\\includegraphics[width={width_macro}]{{{}}}\n",
                 escape::escape_url(path)
@@ -136,9 +140,9 @@ fn render_node(node: &Node, symbols: &SymbolTable, out: &mut String) {
             rows,
         } => {
             let col_spec = "l".repeat(header.len());
-            out.push_str("\\begin{table}[htbp]\n\\centering\n");
+            out.push_str("\\begin{table}\n\\TerseFigureAlign\n");
             out.push_str(&format!("\\begin{{tabular}}{{{col_spec}}}\n\\toprule\n"));
-            out.push_str(&render_table_row(header));
+            out.push_str(&render_table_header_row(header));
             out.push_str(" \\\\\n\\midrule\n");
             for row in rows {
                 out.push_str(&render_table_row(row));
@@ -202,6 +206,30 @@ fn render_table_row(cells: &[String]) -> String {
         .join(" & ")
 }
 
+/// Header cells go through a style-owned macro rather than a literal
+/// `\textbf`: each cell is its own group in a `tabular`, so a row-level
+/// font switch would only reach the first column. The macro name is fixed,
+/// so these bytes are the same under every theme.
+fn render_table_header_row(cells: &[String]) -> String {
+    cells
+        .iter()
+        .map(|c| format!("\\TerseTableHeaderCell{{{}}}", escape::escape_text(c)))
+        .collect::<Vec<_>>()
+        .join(" & ")
+}
+
+/// The six theorem-like environments and their printed labels, in the
+/// semantic model's kind order so a theme's `theorem_style` array lines up
+/// index for index.
+const THEOREM_ENVIRONMENTS: [(&str, &str); 6] = [
+    ("tersetheorem", "Theorem"),
+    ("terseproposition", "Proposition"),
+    ("terselemma", "Lemma"),
+    ("tersedefinition", "Definition"),
+    ("terseexample", "Example"),
+    ("terseremark", "Remark"),
+];
+
 fn theorem_environment(kind: TheoremKind) -> &'static str {
     match kind {
         TheoremKind::Theorem => "tersetheorem",
@@ -231,6 +259,12 @@ fn render_list(ordered: bool, start: Option<u32>, items: &[ListItem], symbols: &
 // Metadata renders in fixed semantic order: title, subtitle,
 // authors/affiliations, explicit date, abstract, keywords, then body.
 fn render_title_material(metadata: &DocumentMetadata, out: &mut String) {
+    // One environment around all of the title material, so a theme can
+    // decide the *layout* of the whole block (an inline paper title or a
+    // cover page ending in `\clearpage`) without this file changing a byte
+    // between themes. Individual macros can only carry sizes; a page break
+    // has to belong to something that owns the block's end.
+    out.push_str("\\begin{TerseTitleBlock}\n");
     out.push_str(&format!(
         "\\TerseTitle{{{}}}\n",
         escape::escape_text(&metadata.title)
@@ -288,6 +322,7 @@ fn render_title_material(metadata: &DocumentMetadata, out: &mut String) {
             .join(", ");
         out.push_str(&format!("\\TerseKeywords{{{joined}}}\n"));
     }
+    out.push_str("\\end{TerseTitleBlock}\n");
 }
 
 fn render_inlines(inlines: &[Inline], symbols: &SymbolTable, out: &mut String) {
@@ -407,6 +442,8 @@ pub const BUILTIN_PACKAGES: &[&str] = &["tikz"];
 /// valid document fail export validation.
 pub const STYLE_PACKAGES: &[&str] = &[
     "fontspec",
+    "geometry",
+    "xcolor",
     "amsmath",
     "amsthm",
     "graphicx",
@@ -437,11 +474,49 @@ pub fn validate_packages(packages: &[String]) -> Result<Vec<&'static str>, Unkno
     Ok(out)
 }
 
+/// The four TeX-distributed font files a body-font token selects, by
+/// filename. The "Portable font and asset selection" requirement demands
+/// selection *by filename*, never by family name: a family lookup goes
+/// through the host's fontconfig database, which a fresh TeX installation
+/// need not populate with TeX-tree fonts. Loading the package alone is not
+/// enough, because a package like `tgheros` sets only `\sfdefault` and
+/// leaves body text in the class default.
+pub fn font_files_for(token: &str) -> [&'static str; 4] {
+    match token {
+        "tex-gyre-heros" => [
+            "texgyreheros-regular.otf",
+            "texgyreheros-bold.otf",
+            "texgyreheros-italic.otf",
+            "texgyreheros-bolditalic.otf",
+        ],
+        "tex-gyre-pagella" => [
+            "texgyrepagella-regular.otf",
+            "texgyrepagella-bold.otf",
+            "texgyrepagella-italic.otf",
+            "texgyrepagella-bolditalic.otf",
+        ],
+        "latin-modern" => [
+            "lmroman10-regular.otf",
+            "lmroman10-bold.otf",
+            "lmroman10-italic.otf",
+            "lmroman10-bolditalic.otf",
+        ],
+        // `libertinus-otf` and any future token default to Libertinus
+        // Serif, the compiler default family.
+        _ => [
+            "LibertinusSerif-Regular.otf",
+            "LibertinusSerif-Bold.otf",
+            "LibertinusSerif-Italic.otf",
+            "LibertinusSerif-BoldItalic.otf",
+        ],
+    }
+}
+
 /// Maps a theme's versioned, stable body-font token to the actual
-/// TeX-distributed package name that provides it. The token itself (not
-/// this mapping) is what a `.theme` file declares and what
-/// [`ResolvedTheme`] stores, so the package this loads can change without
-/// touching any authored theme.
+/// TeX-distributed package name that provides it. The package still loads
+/// alongside [`font_files_for`]'s `\setmainfont`, because these packages
+/// also carry NFSS and math setup (`libertinus-otf` pulls `unicode-math`)
+/// that dropping them would silently change.
 pub fn font_package_for(token: &str) -> &str {
     match token {
         "tex-gyre-heros" => "tgheros",
@@ -473,11 +548,71 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
     let bibliography_setup = match bibliography_language {
         Some(language) => format!(
             "\\RequirePackage[main={babel_lang}]{{babel}}\n\
-\\RequirePackage[backend=biber,sorting=none,language={babel_lang}]{{biblatex}}\n",
+\\RequirePackage[backend=biber,sorting=none,style={citation_style},language={babel_lang}]{{biblatex}}\n\
+\\renewcommand*{{\\bibfont}}{{{bib_size}}}\n\
+\\setlength{{\\bibitemsep}}{{{bib_sep}em}}\n",
             babel_lang = babel_language_for(language),
+            // Bibliography typography can only be set where BibLaTeX is
+            // actually loaded: a module with no citations never loads it.
+            bib_size = match theme.bibliography_size.as_str() {
+                "small" => "\\small",
+                "footnotesize" => "\\footnotesize",
+                _ => "\\normalsize",
+            },
+            bib_sep = theme.bibliography_item_spacing_em,
+            // `sorting=none` keeps first-citation order in both styles; the
+            // theme decides only how a citation is *rendered*.
+            citation_style = match theme.citation_style.as_str() {
+                "numeric" => "numeric",
+                _ => "authoryear",
+            },
         ),
         None => String::new(),
     };
+    // Page geometry. Without this the class default (letter, wide margins)
+    // silently wins over whatever the theme declares.
+    let geometry = format!(
+        "\\RequirePackage[{paper},margin={margin}cm]{{geometry}}\n",
+        paper = if theme.page_size == "letter" { "letterpaper" } else { "a4paper" },
+        margin = theme.page_margin_cm,
+    );
+    // Two-column is a class option, and the class line lives in the
+    // theme-blind body, so the switch has to happen from the style file.
+    // `\twocolumn` keeps LaTeX's native float machinery, which `multicol`
+    // does not.
+    let columns = if theme.page_columns == 2 {
+        "\\AtBeginDocument{\\twocolumn}\n"
+    } else {
+        ""
+    };
+    let [regular, bold, italic, bold_italic] = font_files_for(&theme.body_font);
+    let main_font = format!(
+        "\\setmainfont{{{regular}}}[BoldFont={bold},ItalicFont={italic},BoldItalicFont={bold_italic}]\n"
+    );
+    let body_color = format!(
+        "\\definecolor{{TerseBodyColor}}{{HTML}}{{{hex}}}\n\\AtBeginDocument{{\\color{{TerseBodyColor}}}}\n",
+        hex = theme.body_color.to_uppercase(),
+    );
+    // Float alignment and placement were literals in the body until this
+    // change, which made them unreachable from a theme without breaking
+    // the identical-body-bytes invariant. `\fps@figure`/`\fps@table` are
+    // the class's own default-placement hooks, so the body can now emit
+    // `\begin{figure}` with no optional argument at all.
+    let figure_controls = format!(
+        "\\newcommand{{\\TerseFigureAlign}}{{{align}}}\n\
+\\newcommand{{\\TerseFigurePlacement}}{{{placement}}}\n\
+\\makeatletter\n\\let\\fps@figure\\TerseFigurePlacement\n\\let\\fps@table\\TerseFigurePlacement\n\\makeatother\n",
+        align = match theme.figure_align.as_str() {
+            "left" => "\\raggedright",
+            "right" => "\\raggedleft",
+            _ => "\\centering",
+        },
+        placement = match theme.figure_placement.as_str() {
+            "top" => "tbp",
+            "bottom" => "bp",
+            _ => "htbp",
+        },
+    );
     let watermark = if theme.watermark_kind == "none" {
         String::new()
     } else {
@@ -531,12 +666,57 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
         default = f64::from(theme.figure_default_width_pct) / 100.0,
         wide = f64::from(theme.figure_wide_width_pct) / 100.0,
     );
+    // The title block is the one place a theme controls page *layout*: the
+    // cover variant opens with the logo and closes with a page break, and
+    // is therefore also the only sensible invocation point for `\TerseLogo`.
+    let title_align = if theme.title_align == "left" {
+        "\\raggedright"
+    } else {
+        "\\centering"
+    };
+    let title_block = if theme.title_layout == "cover" {
+        format!(
+            "\\newenvironment{{TerseTitleBlock}}\
+{{\\begingroup{title_align}\\vspace*{{2cm}}\\TerseLogo\\par\\bigskip}}\
+{{\\par\\endgroup\\clearpage}}\n"
+        )
+    } else {
+        format!(
+            "\\newenvironment{{TerseTitleBlock}}\
+{{\\begingroup{title_align}}}\
+{{\\par\\endgroup\\bigskip}}\n"
+        )
+    };
+    let theorem_setup: String = THEOREM_ENVIRONMENTS
+        .iter()
+        .zip(theme.theorem_style.iter())
+        .map(|((env, label), style)| {
+            format!("\\theoremstyle{{{style}}}\n\\newtheorem{{{env}}}{{{label}}}\n")
+        })
+        .collect();
+    let table_setup = format!(
+        "\\renewcommand{{\\arraystretch}}{{{padding}}}\n\
+\\newcommand{{\\TerseTableHeaderCell}}[1]{{{header}}}\n{rules}",
+        padding = theme.table_padding,
+        header = if theme.table_header == "plain" { "#1" } else { "\\textbf{#1}" },
+        // `booktabs` is always loaded; the `plain` choice maps its rules
+        // onto the classic `\hline` rather than dropping them, so a table
+        // never silently loses its structure.
+        rules = if theme.table_rules == "plain" {
+            "\\let\\toprule\\hline\n\\let\\midrule\\hline\n\\let\\bottomrule\\hline\n"
+        } else {
+            ""
+        },
+    );
     format!(
         "% Generated by terse for theme '{name}'. Do not edit by hand.\n\
 \\NeedsTeXFormat{{LaTeX2e}}\n\
 \\ProvidesPackage{{terse-style}}\n\
 \\RequirePackage{{fontspec}}\n\
 \\RequirePackage{{{font_package}}}\n\
+{main_font}\
+{geometry}\
+\\RequirePackage{{xcolor}}\n\
 \\RequirePackage{{amsmath}}\n\
 \\RequirePackage{{amsthm}}\n\
 \\RequirePackage{{graphicx}}\n\
@@ -545,17 +725,17 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
 \\RequirePackage{{hyperref}}\n\
 {bibliography_setup}\
 {extra}\
+{body_color}\
+{columns}\
 {watermark}\
 {logo}\
 {figure_widths}\
+{figure_controls}\
+{table_setup}\
 {headings}\
-\\newtheorem{{tersetheorem}}{{Theorem}}\n\
-\\newtheorem{{terseproposition}}{{Proposition}}\n\
-\\newtheorem{{terselemma}}{{Lemma}}\n\
-\\newtheorem{{tersedefinition}}{{Definition}}\n\
-\\newtheorem{{terseexample}}{{Example}}\n\
-\\newtheorem{{terseremark}}{{Remark}}\n\
+{theorem_setup}\
 \\newenvironment{{TerseEquation}}{{\\begin{{equation}}}}{{\\end{{equation}}}}\n\
+{title_block}\
 \\newcommand{{\\TerseTitle}}[1]{{{{\\Huge\\bfseries #1\\par}}}}\n\
 \\newcommand{{\\TerseSubtitle}}[1]{{{{\\Large #1\\par}}}}\n\
 \\newcommand{{\\TerseAuthor}}[2]{{{{\\large #1\\par}}}}\n\

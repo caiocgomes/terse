@@ -5,3 +5,4 @@
 .docker-target/
 managed-prefix*.tar.gz
 /dist
+.gitnexus

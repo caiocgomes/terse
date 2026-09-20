@@ -339,6 +339,7 @@ fn run_export(
         &validated.extra_packages,
         &validated.support_files,
         &validated.cited,
+        &validated.plan.file_paths,
     ) {
         Ok(m) => m,
         Err(terse_core::artifact::SupportFileCollision(name)) => {

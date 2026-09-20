@@ -17,7 +17,14 @@ use super::GeneratedFile;
 /// again), and `build-manifest.json` is this compiler's own internal
 /// determinism-check manifest, superseded here by the export's own
 /// [`MANIFEST_FILE_NAME`] with a different, export-specific schema.
-const EXCLUDED_FROM_EXPORT: &[&str] = &["COMPILE.txt", "build-manifest.json"];
+/// `paper.map.json` is a generated-to-source diagnostic map: the target
+/// forbids maps and reports, and it would be meaningless in a package
+/// from which the original `.trs` sources are deliberately absent.
+const EXCLUDED_FROM_EXPORT: &[&str] = &[
+    "COMPILE.txt",
+    "build-manifest.json",
+    crate::latex::source_map::SOURCE_MAP_FILE_NAME,
+];
 
 pub const MANIFEST_FILE_NAME: &str = "MANIFEST.json";
 pub const EXPORT_MANIFEST_SCHEMA_VERSION: u32 = 1;

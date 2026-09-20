@@ -64,6 +64,28 @@ pub fn page_count(pdf: &Path) -> usize {
         .expect("pdfinfo output must contain a Pages: line")
 }
 
+/// Page dimensions in PostScript points, as `pdfinfo` reports them
+/// (`Page size:  612 x 792 pts (letter)`). A4 is 595 x 842, letter is
+/// 612 x 792, so this distinguishes the two page sizes a theme can select
+/// as well as any margin change that alters the trim box.
+pub fn page_size(pdf: &Path) -> (f32, f32) {
+    let output = Command::new("pdfinfo")
+        .arg(pdf)
+        .output()
+        .expect("pdfinfo must run");
+    assert!(output.status.success(), "pdfinfo failed on {pdf:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text
+        .lines()
+        .find_map(|l| l.strip_prefix("Page size:"))
+        .expect("pdfinfo output must contain a Page size: line");
+    let mut parts = line.split_whitespace();
+    let width: f32 = parts.next().and_then(|n| n.parse().ok()).expect("page width");
+    parts.next();
+    let height: f32 = parts.next().and_then(|n| n.parse().ok()).expect("page height");
+    (width, height)
+}
+
 /// Text layer of one specific page (1-indexed).
 pub fn extract_text_page(pdf: &Path, page: usize) -> String {
     let output = Command::new("pdftotext")

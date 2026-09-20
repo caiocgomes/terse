@@ -204,10 +204,10 @@ fn test_json_diagnostics_are_stable() {
     )
     .unwrap();
 
-    // Run twice under varied terminal/color-ish environment to prove the
-    // JSON output does not depend on it; capture stdout each time via the
-    // lower-level diagnostics API directly (stable across process
-    // boundaries the same way, without needing to fork a real process).
+    // Run twice through the library to prove byte-stability of the
+    // envelope itself. The stdout/stderr split the requirement also
+    // demands cannot be observed this way at all, so it is asserted at
+    // process level below.
     let (_, entry_path, diags1) = terse_cli::build::check_diagnostics(&tmp, None, None, false, false).unwrap();
     let (_, _, diags2) = terse_cli::build::check_diagnostics(&tmp, None, None, false, false).unwrap();
     let loaded = terse_cli::project::load_modules(&tmp, &entry_path).unwrap();
@@ -246,6 +246,57 @@ fn test_json_diagnostics_are_stable() {
     .unwrap();
     let code = terse_cli::run(["terse", "check", "--json"], &tmp);
     assert_eq!(code, 0);
+}
+
+/// The requirement says machine-readable output is "deterministic and
+/// isolated": JSON on stdout, every byte of progress prose on stderr. A
+/// library-level assertion cannot observe that split at all, so this runs
+/// the real binary and reads the two streams apart, the way `tests/doctor.rs`
+/// already does for `doctor --json`.
+#[test]
+fn test_json_goes_to_stdout_only() {
+    let tmp = tempdir("json-stream-isolation");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        "document:\n  title: \"T\"\n\nSee @missing for details.\n",
+    )
+    .unwrap();
+
+    for args in [
+        vec!["check", "--json"],
+        vec!["build", "--tex-only", "--json"],
+    ] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_terse"))
+            .args(&args)
+            .current_dir(&tmp)
+            .output()
+            .expect("the binary runs");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+
+        let value: serde_json::Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("stdout must be JSON alone for {args:?}: {e}\n{stdout}"));
+        assert_eq!(value["version"], 1, "for {args:?}");
+        assert_eq!(value["diagnostics"][0]["code"], "E-CITE-001", "for {args:?}");
+
+        assert!(
+            !stdout.contains("\u{1b}["),
+            "stdout must carry no ANSI escapes for {args:?}"
+        );
+        assert!(
+            !stdout.contains("error["),
+            "human-rendered diagnostics must not be interleaved on stdout for {args:?}: {stdout}"
+        );
+        assert!(
+            !stderr.contains("\"diagnostics\""),
+            "the JSON envelope belongs on stdout, not stderr, for {args:?}"
+        );
+    }
 }
 
 #[test]

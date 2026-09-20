@@ -329,6 +329,11 @@ pub enum CompileFailure {
     /// failure rather than silently shipping a document with missing
     /// text.
     MissingGlyph,
+    /// The engine exited successfully and stopped asking to be rerun, but
+    /// its settled log still reports unresolved references or citations.
+    /// XeLaTeX writes `??` into the PDF and exits 0 in that case, so
+    /// publishing it would ship visibly broken output as a success.
+    UndefinedReferences,
 }
 
 #[derive(Debug, Clone)]
@@ -480,7 +485,15 @@ pub fn compile_bounded_with_env(
     // pass limit.
     loop {
         let last_log = &passes.last().expect("at least one pass has run").outcome.stdout;
-        if !rerun_needed(last_log) {
+        // The rerun marker is the engine's own hint, not the convergence
+        // condition. A biblatex build reaches a pass that still reports
+        // "There were undefined references" while emitting no marker, and
+        // one further pass resolves it; stopping on the marker alone
+        // published a PDF containing `??`. Unresolved references are
+        // therefore themselves a reason to rerun, bounded by the same
+        // pass budget, and only persist as a failure once that budget or
+        // the document itself refuses to converge.
+        if !rerun_needed(last_log) && !logs::has_undefined_references(&passes) {
             break;
         }
         take_pass_slot!();

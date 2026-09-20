@@ -30,6 +30,8 @@ texlive-year = "2025"
 # it never checked.
 packages = [
     "fontspec",
+    "geometry",
+    "xcolor",
     "amsmath",
     "amsthm",
     "graphicx",

@@ -1,0 +1,55 @@
+// Contrast theme for the `close-verification-gaps` acceptance evidence.
+// Every value here is one that the schema accepted and the generator
+// discarded before this change: letter paper instead of A4, a wide margin,
+// two columns, a sans body family, a non-black body color, numeric
+// citations, a logo that was defined as a macro and never placed, and a
+// cover layout that had no properties at all. Compiled against `academic`,
+// each of these must now be observable in the rendered PDF. No private or
+// corporate resources; the logo is the same redistributable placeholder
+// the magalu demonstration uses.
+
+page:
+  size: letter
+  margin: 3cm
+  columns: 2
+
+body:
+  font: tex-gyre-heros
+  color: #203040
+
+figure:
+  align: center
+  default-width: 60%
+  placement: top
+
+figure[role=wide]:
+  default-width: 95%
+
+citation:
+  style: numeric
+
+title:
+  layout: cover
+  align: center
+
+theorem:
+  style: plain
+
+theorem[kind=remark]:
+  style: remark
+
+table:
+  padding: 1.3
+  rules: plain
+  header: plain
+
+bibliography:
+  size: small
+  item-spacing: 1em
+
+watermark:
+  kind: none
+
+logo:
+  source: assets/logo.png
+  width: 30%

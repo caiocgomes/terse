@@ -244,8 +244,14 @@ fn test_doctor_detects_corrupt_par_cache_and_fixes_it() {
     fs::set_permissions(bin.join("biber"), fs::Permissions::from_mode(0o755)).unwrap();
 
     let tmp = root.join("tmp");
-    let username = std::env::var("USER").expect("USER is set");
-    let par = terse_core::toolchain::par::par_cache_dir(&tmp, &username);
+    // The username is pinned rather than read from the ambient environment
+    // and then handed to the child below, so the test computes the same
+    // PAR path the child will. Reading `USER` here made this case fail in
+    // the pinned container, where none of `USER`/`USERNAME`/`LOGNAME` is
+    // set: a test that cannot run in the acceptance environment cannot
+    // protect it.
+    let username = "terse-test-user";
+    let par = terse_core::toolchain::par::par_cache_dir(&tmp, username);
     fs::create_dir_all(par.join("cache-x")).unwrap();
     fs::write(par.join("cache-x").join("file"), b"stale").unwrap();
     fs::write(tmp.join("sibling.txt"), b"keep me").unwrap();
@@ -253,6 +259,7 @@ fn test_doctor_detects_corrupt_par_cache_and_fixes_it() {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_terse"))
         .args(["doctor", "--fix", "--json", "--toolchain", root.join("tc").to_str().unwrap()])
         .env("TMPDIR", &tmp)
+        .env("USER", username)
         .current_dir(&root)
         .output()
         .expect("binary runs");

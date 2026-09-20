@@ -273,8 +273,8 @@ fn test_theme_invariant_projection() {
     let file_b = SourceFile::new(FileId(1), "entry.trs", bytes).expect("valid source");
     let (_, plan_a) = compile(&InputSnapshot::single(file_a));
     let (_, plan_b) = compile(&InputSnapshot::single(file_b));
-    let proj_a = crate::semantic::projection::project(&plan_a.expect("plan").module);
-    let proj_b = crate::semantic::projection::project(&plan_b.expect("plan").module);
+    let proj_a = { let p = plan_a.expect("plan"); crate::semantic::projection::project(&p.module, &p.bindings.authorized) };
+    let proj_b = { let p = plan_b.expect("plan"); crate::semantic::projection::project(&p.module, &p.bindings.authorized) };
 
     // Assertion: equal authored content projects identically even though
     // the two modules came from distinct FileIds (excluded as incidental).
@@ -288,7 +288,7 @@ fn test_theme_invariant_projection() {
     let other = b"document:\n  title: \"T\"\n\n# Intro {id: intro}\n\nGoodbye *world*.\n".to_vec();
     let file_c = SourceFile::new(FileId(2), "entry.trs", other).expect("valid source");
     let (_, plan_c) = compile(&InputSnapshot::single(file_c));
-    let proj_c = crate::semantic::projection::project(&plan_c.expect("plan").module);
+    let proj_c = { let p = plan_c.expect("plan"); crate::semantic::projection::project(&p.module, &p.bindings.authorized) };
     assert_ne!(proj_a, proj_c);
     assert_ne!(
         crate::semantic::projection::digest(&proj_a),
@@ -315,4 +315,103 @@ fn test_resource_limits_fail_boundedly() {
     assert!(plan.is_none(), "a document exceeding the nesting limit must never produce a plan");
     assert!(!diags.is_empty());
     assert_eq!(diags[0].code, "E-LIMIT-001");
+
+    // The requirement names four limit categories; nesting above is one.
+    // Each of the remaining three must fail with its own code and never
+    // yield a plan, so that a pathological input is a bounded, explained
+    // refusal rather than an unbounded allocation or a stack overflow.
+
+    // Source bytes: rejected at the single chokepoint where bytes enter
+    // the core, before any parsing work is attempted.
+    let oversized = vec![b'x'; crate::source::MAX_SOURCE_BYTES + 1];
+    let err = SourceFile::new(FileId(0), "huge.trs", oversized)
+        .expect_err("a source past the byte cap must not load");
+    assert_eq!(err.into_diagnostic(FileId(0)).code, "E-LIMIT-003");
+
+    // Node count: a module whose block count exceeds the cap.
+    let mut many = String::from("document:\n  title: \"T\"\n\n");
+    for i in 0..(crate::semantic::MAX_NODES + 1) {
+        many.push_str(&format!("p{i}\n\n"));
+    }
+    let file = SourceFile::new(FileId(0), "many.trs", many.into_bytes()).expect("valid source");
+    let (diags, plan) = compile(&InputSnapshot::single(file));
+    assert!(plan.is_none(), "a document exceeding the node limit must never produce a plan");
+    assert_eq!(diags[0].code, "E-LIMIT-004");
+
+    // Include depth: a chain one level past the cap fails, and a chain one
+    // level below it succeeds, so the boundary is exercised from both
+    // sides rather than only from the failing one.
+    assert_eq!(include_chain_codes(crate::project::expand::MAX_INCLUDE_DEPTH + 1), vec!["E-LIMIT-005"]);
+    assert!(
+        include_chain_codes(crate::project::expand::MAX_INCLUDE_DEPTH - 1).is_empty(),
+        "a chain just below the include-depth cap must still compile"
+    );
+}
+
+/// Builds an entry that includes `depth` chained modules and returns the
+/// diagnostic codes compiling it produces (empty on success).
+fn include_chain_codes(depth: usize) -> Vec<String> {
+    use std::collections::HashMap;
+
+    let mut modules: HashMap<String, SourceFile> = HashMap::new();
+    let entry_src = "document:\n  title: \"T\"\n\ninclude \"m0.trs\"\n".to_string();
+    let entry = SourceFile::new(FileId(0), "paper.trs", entry_src.into_bytes()).expect("valid entry");
+    for i in 0..depth {
+        let body = if i + 1 < depth {
+            format!("include \"m{}.trs\"\n", i + 1)
+        } else {
+            "leaf paragraph\n".to_string()
+        };
+        let file = SourceFile::new(FileId((i + 1) as u32), format!("m{i}.trs"), body.into_bytes())
+            .expect("valid module");
+        modules.insert(format!("m{i}.trs"), file);
+    }
+    let snapshot = InputSnapshot {
+        entry_key: "paper.trs".to_string(),
+        entry,
+        modules,
+        lock: None,
+        overrides: HashMap::new(),
+    };
+    let (diags, _plan) = compile(&snapshot);
+    diags.into_iter().map(|d| d.code.to_string()).collect()
+}
+
+#[test]
+fn test_projection_retains_effective_bibliography() {
+    // Two documents identical in authored content whose cited work has
+    // different effective (locked) metadata must project differently and
+    // digest differently: the bibliography a reader sees is part of the
+    // document's meaning, so a projection that omits it would call two
+    // materially different papers equal.
+    let src = "document:\n  title: \"T\"\n\nrefs:\n  robins1986: doi:10.1000/abc\n\nCited @robins1986 here.\n\nbibliography\n";
+
+    let lock_a = locked_robins1986();
+    let mut lock_b = locked_robins1986();
+    if let Some(entry) = lock_b.entries.get_mut("robins1986") {
+        // Both the provider data and the sealed effective record move
+        // together: binding recomputes `effective` from `provider_data`
+        // plus any patch, so editing only one of them changes nothing.
+        let title = Some("A Completely Different Title".to_string());
+        entry.provider_data.title = title.clone();
+        entry.effective.title = title;
+    }
+
+    let project_with = |lock: LockFile| {
+        let file = SourceFile::new(FileId(0), "p.trs", src.as_bytes().to_vec()).expect("valid");
+        let mut snapshot = InputSnapshot::single(file);
+        snapshot.lock = Some(lock);
+        let (diags, plan) = compile(&snapshot);
+        assert!(diags.is_empty(), "{diags:?}");
+        let plan = plan.expect("plan");
+        let projection = crate::semantic::projection::project(&plan.module, &plan.bindings.authorized);
+        let digest = crate::semantic::projection::digest(&projection);
+        (projection, digest)
+    };
+
+    let (proj_a, digest_a) = project_with(lock_a);
+    let (proj_b, digest_b) = project_with(lock_b);
+
+    assert_ne!(proj_a, proj_b, "differing effective bibliography must project differently");
+    assert_ne!(digest_a, digest_b, "differing effective bibliography must digest differently");
 }

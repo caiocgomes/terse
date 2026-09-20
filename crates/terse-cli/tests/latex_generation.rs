@@ -205,6 +205,85 @@ fn test_engine_pass_limit_is_enforced() {
 }
 
 #[test]
+fn test_source_map_is_a_published_deliverable() {
+    // `paper.map.json` is named among the default deliverables. It has to
+    // be asserted on the *published set*, not on the generating function:
+    // the map generator existed, worked, and was unit-tested for a long
+    // time while never being wired into a build at all.
+    let tmp = tempdir("source-map");
+    fs::write(tmp.join("terse.toml"), MANIFEST).unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        "document:\n  title: \"T\"\n\nEntry paragraph.\n\ninclude \"part.trs\"\n",
+    )
+    .unwrap();
+    fs::write(tmp.join("part.trs"), "Included paragraph.\n").unwrap();
+
+    assert_eq!(terse_cli::run(["terse", "build", "--tex-only"], &tmp), 0);
+    let out = tmp.join("build").join("academic");
+    let map_text = fs::read_to_string(out.join("paper.map.json")).expect("paper.map.json is published");
+
+    let map: serde_json::Value = serde_json::from_str(&map_text).expect("map parses as JSON");
+    assert!(map["schema-version"].as_u64().is_some(), "map carries a schema version");
+    let intervals = map["intervals"].as_array().expect("intervals array");
+    assert!(!intervals.is_empty(), "a document with body content maps at least one interval");
+
+    // Paths must be root-relative with `/` separators: no absolute host
+    // path, and no raw numeric file id leaking through.
+    for interval in intervals {
+        let path = interval["path"].as_str().expect("every interval names its source path");
+        assert!(!path.starts_with('/'), "root-relative, got {path}");
+        assert!(!path.contains('\\'), "portable separators, got {path}");
+        assert!(!path.contains(&tmp.to_string_lossy().to_string()), "no host path in {path}");
+    }
+    // The included module is attributed to itself, not to the entry.
+    assert!(
+        intervals.iter().any(|i| i["path"] == "part.trs"),
+        "an interval resolves to the included module: {map_text}"
+    );
+
+    // And it is hashed by the build manifest, which is only true if it was
+    // pushed before the manifest was computed.
+    let manifest = fs::read_to_string(out.join("build-manifest.json")).unwrap();
+    assert!(manifest.contains("paper.map.json"), "manifest hashes the map: {manifest}");
+}
+
+#[test]
+fn test_undefined_references_fail_the_build() {
+    let _guard = PATH_LOCK.lock().unwrap();
+    let tmp = tempdir("undefined-refs");
+    fs::write(tmp.join("terse.toml"), MANIFEST).unwrap();
+    fs::write(tmp.join("paper.trs"), ENTRY).unwrap();
+
+    // A known-good previous generation to protect.
+    assert_eq!(terse_cli::run(["terse", "build", "--tex-only"], &tmp), 0);
+    let out = tmp.join("build").join("academic");
+    let before: Vec<(String, Vec<u8>)> = ["paper.tex", "terse-style.sty", "COMPILE.txt"]
+        .iter()
+        .map(|name| (name.to_string(), fs::read(out.join(name)).unwrap()))
+        .collect();
+
+    // XeLaTeX exits 0 while leaving `??` in the PDF, so the failure can
+    // only come from the settled log's own text.
+    let mut runner = FakeProcessRunner::new(vec![ProcessOutcome::success_with_log(
+        &b"LaTeX Warning: There were undefined references.\n"[..],
+    )]);
+    let code = terse_cli::build::run_build_with_runner(&tmp, None, None, false, true, &mut runner);
+    assert_eq!(code, 3, "an undefined reference in the final pass fails the build");
+
+    for (name, bytes) in &before {
+        assert_eq!(&fs::read(out.join(name)).unwrap(), bytes, "{name} survives the failed build");
+    }
+
+    // The final-pass-only semantics (the regression an `.any()`-over-all-
+    // passes scan would cause, since every intermediate pass of a citation
+    // build reports undefined references before `.aux`/`.bbl` are read
+    // back) is asserted directly against the log-interpretation function
+    // in `engine::logs`, which is where that decision lives and where a
+    // fake runner's inability to produce a PDF cannot mask the result.
+}
+
+#[test]
 fn test_failed_engine_keeps_previous_generation() {
     let _guard = PATH_LOCK.lock().unwrap();
     let tmp = tempdir("engine-failure");
@@ -536,7 +615,24 @@ fn test_theme_switch_keeps_body_bytes() {
 #[test]
 fn test_cover_keeps_all_metadata() {
     let tmp = tempdir("cover-metadata");
-    fs::write(tmp.join("terse.toml"), MANIFEST).unwrap();
+    // A real cover theme: until `close-verification-gaps` the `title`
+    // component accepted no properties, so this scenario ran under the
+    // default paper theme and could not have detected a cover layout that
+    // dropped metadata to fit the page.
+    fs::write(
+        tmp.join("terse.toml"),
+        concat!(
+            "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n\n",
+            "[themes]\nacademic = \"themes/cover.theme\"\n",
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.join("themes")).unwrap();
+    fs::write(
+        tmp.join("themes/cover.theme"),
+        "title:\n  layout: cover\n  align: center\n",
+    )
+    .unwrap();
     fs::write(
         tmp.join("paper.trs"),
         concat!(
@@ -567,6 +663,24 @@ fn test_cover_keeps_all_metadata() {
     assert!(tex.contains("\\TerseKeywords{computation, engines}"));
     // PDF-level document metadata, distinct from the visible cover text.
     assert!(tex.contains("\\hypersetup{pdftitle={Full Cover},pdfauthor={Ada Lovelace}}"));
+
+    // All of the above is theme-blind by construction, so on its own it
+    // could not tell a cover from a paper title. The layout lives in the
+    // style: assert this really is the cover variant, and that the whole
+    // block is what the theme owns.
+    let style = fs::read_to_string(tmp.join("build/academic/terse-style.sty")).unwrap();
+    let cover = style
+        .lines()
+        .find(|l| l.contains("{TerseTitleBlock}"))
+        .expect("the title block environment is defined");
+    assert!(
+        cover.contains("\\clearpage"),
+        "a cover layout must give the title material its own page: {cover}"
+    );
+    assert!(
+        tex.contains("\\begin{TerseTitleBlock}") && tex.contains("\\end{TerseTitleBlock}"),
+        "every metadata macro must sit inside the block the theme lays out"
+    );
 }
 
 #[test]

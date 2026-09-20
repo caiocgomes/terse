@@ -105,9 +105,20 @@ fn test_indirect_include_cycle_is_complete() {
         .iter()
         .find(|d| d.code == "E-INCLUDE-003")
         .expect("cycle diagnostic");
-    assert!(diag.message.contains("paper.trs"));
-    assert!(diag.message.contains("method.trs"));
-    assert!(diag.message.contains("appendix.trs"));
+    // The scenario asks for the complete route *and* its edge locations,
+    // not merely that the three filenames occur somewhere: checking only
+    // for occurrence accepted a scrambled order and a route that never
+    // closed back onto the entry, which are the two ways this diagnostic
+    // can be wrong while still naming every file.
+    assert_eq!(
+        diag.message,
+        "include cycle: paper.trs \u{2192} method.trs \u{2192} appendix.trs \u{2192} paper.trs",
+        "the route must be ordered and closed back onto the entry"
+    );
+    assert!(
+        diag.primary.is_some(),
+        "the cycle is reported at the include edge that closes it"
+    );
 }
 
 #[test]

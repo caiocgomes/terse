@@ -9,9 +9,17 @@
 //! returns `None` for it rather than inventing a span, which is exactly
 //! the "unmappable stays generated" contract.
 
+use std::collections::BTreeMap;
+
 use crate::semantic::{build_symbol_table, ParsedModule};
-use crate::source::SourceSpan;
+use crate::source::{FileId, SourceSpan};
 use crate::theme::ResolvedTheme;
+
+/// Bumped whenever `paper.map.json`'s shape changes.
+pub const SOURCE_MAP_SCHEMA_VERSION: u32 = 1;
+
+/// The published name of the generated-to-source map.
+pub const SOURCE_MAP_FILE_NAME: &str = "paper.map.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -47,6 +55,39 @@ impl SourceMap {
             .map(|i| match i.origin {
                 Origin::Source(span) => span,
             })
+    }
+
+    pub fn intervals(&self) -> &[GeneratedInterval] {
+        &self.intervals
+    }
+
+    /// Serializes the map as `paper.map.json`. `paths` resolves each
+    /// interval's [`FileId`] to its root-relative logical path, because a
+    /// numeric id would be meaningless to anyone reading the published
+    /// artifact and the requirement calls for root-relative source-map
+    /// paths. An id absent from the table is skipped rather than emitted
+    /// as a number: an unresolvable origin is not a source location.
+    ///
+    /// Hand-rolled to match `artifact::build_manifest_json`'s existing
+    /// serialization style, and emitted in interval order, which is
+    /// generated-line order and therefore already deterministic.
+    pub fn to_json(&self, paths: &BTreeMap<FileId, String>) -> String {
+        let mut entries = Vec::new();
+        for interval in &self.intervals {
+            let Origin::Source(span) = interval.origin;
+            let Some(path) = paths.get(&span.file_id) else {
+                continue;
+            };
+            entries.push(format!(
+                "    {{\"start-line\": {}, \"end-line\": {}, \"path\": \"{}\", \"byte-start\": {}, \"byte-end\": {}}}",
+                interval.start_line, interval.end_line, path, span.byte_start, span.byte_end
+            ));
+        }
+        format!(
+            "{{\n  \"schema-version\": {},\n  \"intervals\": [\n{}\n  ]\n}}\n",
+            SOURCE_MAP_SCHEMA_VERSION,
+            entries.join(",\n")
+        )
     }
 }
 

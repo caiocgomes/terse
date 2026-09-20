@@ -279,10 +279,40 @@ fn test_archive_paths_are_portable() {
 }
 
 #[test]
+fn test_source_map_is_excluded_from_export() {
+    // The export target forbids maps and reports. `paper.map.json` is a
+    // deliverable of an ordinary build, so it has to be filtered out here
+    // explicitly, alongside the instructions and the internal manifest.
+    let tmp = tempdir("export-no-map");
+    write(&tmp.join("terse.toml"), MANIFEST);
+    write(&tmp.join("paper.trs"), "document:\n  title: \"T\"\n\nA paragraph.\n");
+
+    assert_eq!(terse_cli::run(["terse", "export", "--target", "arxiv"], &tmp), 0);
+
+    let dir = export_dir(&tmp);
+    assert!(
+        !dir.join("paper.map.json").exists(),
+        "a generated-to-source map is not part of a portable package"
+    );
+    let names = zip_entry_names(&fs::read(zip_path(&tmp)).unwrap());
+    assert!(!names.contains(&"paper.map.json".to_string()), "archive members: {names:?}");
+}
+
+#[test]
 fn test_export_allowlist_excludes_cruft() {
     let tmp = tempdir("allowlist-cruft");
     write(&tmp.join("terse.toml"), MANIFEST);
     write(&tmp.join("paper.trs"), "document:\n  title: \"T\"\n\nA paragraph.\n");
+
+    // The scenario names four kinds of cruft, and this test used to plant
+    // none of them: it asserted only that two generated files were absent,
+    // which the allowlist would satisfy even if it archived the whole
+    // project directory alongside them. Plant all four, in the project
+    // root and in a subdirectory, so a recursive walk cannot pass.
+    write(&tmp.join("unused-photo.png"), b"\x89PNG\r\n\x1a\n not referenced by any figure");
+    write(&tmp.join("paper.trs~"), b"editor backup of the entry");
+    write(&tmp.join("notes/scratch.log"), b"a build log that must not travel");
+    write(&tmp.join("previous-render.pdf"), b"%PDF-1.4 a rendered paper, not a figure");
 
     let code = terse_cli::run(["terse", "export", "--target", "arxiv"], &tmp);
     assert_eq!(code, 0);
@@ -299,6 +329,27 @@ fn test_export_allowlist_excludes_cruft() {
     assert!(!names.contains(&"COMPILE.txt".to_string()));
     assert!(!names.contains(&"build-manifest.json".to_string()));
     assert!(names.contains(&"MANIFEST.json".to_string()));
+
+    // Exact membership against an independently written expected set: the
+    // archive is what the allowlist admits, never what happens to sit in
+    // the project directory.
+    let expected: std::collections::BTreeSet<String> = ["MANIFEST.json", "paper.tex", "references.bib", "terse-style.sty"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let actual: std::collections::BTreeSet<String> = names.iter().cloned().collect();
+    assert_eq!(actual, expected, "the archive must contain exactly the allowlisted members");
+
+    for planted in ["unused-photo.png", "paper.trs~", "notes/scratch.log", "previous-render.pdf", "paper.trs"] {
+        assert!(
+            !names.iter().any(|n| n == planted || n.ends_with(planted)),
+            "{planted} must never reach the archive; members were {names:?}"
+        );
+        assert!(
+            !dir.join(planted).exists(),
+            "{planted} must never reach the staged export directory either"
+        );
+    }
 
     // A used PDF figure is content, not the rendered paper output, and
     // must be retained.

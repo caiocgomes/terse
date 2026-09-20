@@ -335,6 +335,7 @@ pub fn run_build_with_host(
             &extra_packages,
             &support_files,
             &cited,
+            &plan.file_paths,
         ) {
             Ok(m) => m,
             Err(terse_core::artifact::SupportFileCollision(name)) => {
@@ -494,6 +495,12 @@ fn compile_pdf_in(
         .any(|p| String::from_utf8_lossy(&p.outcome.stdout).contains("Missing character"))
     {
         return Err(engine::CompileFailure::MissingGlyph);
+    }
+    // Same shape of silent failure, different scope: xelatex exits 0 with
+    // `??` in the PDF when a reference never resolves. Only the settled
+    // final pass counts (see `has_undefined_references`).
+    if engine::logs::has_undefined_references(&passes) {
+        return Err(engine::CompileFailure::UndefinedReferences);
     }
 
     std::fs::read(work_dir.join("paper.pdf")).map_err(|_| engine::CompileFailure::NonZeroExit {

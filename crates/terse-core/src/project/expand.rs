@@ -59,7 +59,17 @@ pub enum ExpandError {
     /// A non-entry module declared `document:` metadata, which the
     /// language reserves for the entry module only.
     MetadataOutsideEntry { span: SourceSpan },
+    /// The include chain nested deeper than [`MAX_INCLUDE_DEPTH`].
+    DepthExceeded { span: SourceSpan, depth: usize },
 }
+
+/// The deepest include chain the expander will follow. A paper organized
+/// by part, chapter and section nests three or four levels; 32 leaves an
+/// order of magnitude of headroom while keeping the expander's native-
+/// stack recursion bounded well below the depth at which it would
+/// overflow (a limit first tuned to 256 elsewhere in this compiler did
+/// overflow, which is why this one is deliberately conservative).
+pub const MAX_INCLUDE_DEPTH: usize = 32;
 
 impl ExpandError {
     pub fn into_diagnostic(self) -> Diagnostic {
@@ -91,6 +101,11 @@ impl ExpandError {
             ExpandError::MetadataOutsideEntry { span } => Diagnostic::error(
                 "E-INCLUDE-004",
                 "document metadata is only permitted in the entry module",
+                span,
+            ),
+            ExpandError::DepthExceeded { span, depth } => Diagnostic::error(
+                "E-LIMIT-005",
+                format!("include chain nests {depth} levels, exceeding the {MAX_INCLUDE_DEPTH}-level limit"),
                 span,
             ),
         }
@@ -187,6 +202,16 @@ fn expand_module(
                 // two occurrences of the same target from the same parent
                 // still produce distinct routes for their duplicate-origin
                 // diagnostics even though their spans coincide.
+                // Depth is bounded separately from cycles: a chain with no
+                // repeated key is acyclic and would otherwise recurse
+                // without limit, and `expand_module` recurses on the
+                // native stack.
+                if active.len() > MAX_INCLUDE_DEPTH {
+                    return Err(ExpandError::DepthExceeded {
+                        span: *span,
+                        depth: active.len(),
+                    });
+                }
                 *counter += 1;
                 let occurrence = format!("{target}#{counter}");
                 active.push(target.clone());

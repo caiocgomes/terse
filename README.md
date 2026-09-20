@@ -87,9 +87,8 @@ See `docs/` for a fuller guide to each area.
   the same checks CI runs before a release.
 
 CI and local development run the same scripts; there is no separate hosted-only
-validation path. This repository does not itself use git (there is no `.git`
-directory here); the scripts and CI config below assume you'll set one up when
-publishing, and make no other git-specific assumption.
+validation path. The workflows in `.github/workflows/` have not run yet, since
+the repository has no remote; they are configured, not proven.
 
 ## Project layout
 

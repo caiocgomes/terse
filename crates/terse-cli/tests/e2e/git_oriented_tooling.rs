@@ -178,8 +178,8 @@ fn test_maintainer_can_reproduce_release_checks() {
     // cases were added group by group. The requirement is a floor, not an
     // exact match — a shrinking count would indicate lost coverage.
     assert!(
-        discovered >= 183,
-        "discovered {discovered} tests, expected at least the documented floor of 183 (146 named in terse/tests.md plus 37 named in managed-toolchain/tests.md)"
+        discovered >= 377,
+        "discovered {discovered} tests, expected at least the documented floor of 377 (146 named in terse/tests.md, 37 in managed-toolchain/tests.md, the rest added by close-verification-gaps and the edge cases each change accumulated)"
     );
 
     for script in [

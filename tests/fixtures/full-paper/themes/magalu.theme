@@ -23,6 +23,13 @@ figure[role=wide]:
 citation:
   style: numeric
 
+// The cover is what places the logo: the paper layout defines
+// `\TerseLogo` and never invokes it, so a theme that declares a logo
+// without a cover renders no logo at all.
+title:
+  layout: cover
+  align: center
+
 watermark:
   kind: internal-use
   opacity: 0.08

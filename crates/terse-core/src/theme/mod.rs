@@ -28,6 +28,23 @@ pub struct ResolvedTheme {
     pub figure_wide_width_pct: u8,
     pub figure_placement: String,
     pub citation_style: String,
+    /// `paper` keeps the title material inline above the body; `cover`
+    /// gives it its own page, ending with `\clearpage`. A cover is a layout
+    /// decision, not a font size, which is why the body wraps all of its
+    /// title macros in one `TerseTitleBlock` environment the style owns.
+    pub title_layout: String,
+    pub title_align: String,
+    /// One `amsthm` style per theorem-like kind, in the semantic model's
+    /// kind order (theorem, proposition, lemma, definition, example,
+    /// remark). A base `theorem` rule sets all six; a `theorem[kind=...]`
+    /// rule overrides one, which is the inheritance the precedence
+    /// requirement demands.
+    pub theorem_style: [String; 6],
+    pub table_padding: f64,
+    pub table_rules: String,
+    pub table_header: String,
+    pub bibliography_size: String,
+    pub bibliography_item_spacing_em: f64,
     pub watermark_kind: String,
     pub watermark_opacity: f64,
     pub watermark_angle: f64,
@@ -63,6 +80,25 @@ fn compiler_defaults(name: &str) -> ResolvedTheme {
         figure_wide_width_pct: 100,
         figure_placement: "here".to_string(),
         citation_style: "author-year".to_string(),
+        title_layout: "paper".to_string(),
+        // Left, because that is what every document rendered before the
+        // `title` component existed: making a setting real must not
+        // silently restyle documents that never asked for a change. A theme
+        // opts into centering.
+        title_align: "left".to_string(),
+        theorem_style: [
+            "plain".to_string(),
+            "plain".to_string(),
+            "plain".to_string(),
+            "definition".to_string(),
+            "definition".to_string(),
+            "remark".to_string(),
+        ],
+        table_padding: 1.0,
+        table_rules: "booktabs".to_string(),
+        table_header: "bold".to_string(),
+        bibliography_size: "normal".to_string(),
+        bibliography_item_spacing_em: 0.5,
         watermark_kind: "none".to_string(),
         watermark_opacity: 0.0,
         watermark_angle: 45.0,

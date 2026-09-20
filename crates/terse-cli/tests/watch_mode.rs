@@ -347,3 +347,62 @@ fn test_polling_fallback_detects_real_edits() {
     }
     assert!(saw_it, "polling fallback must detect a real edit to a watched file");
 }
+
+/// The real-loop half of the "stale snapshot is never published" scenario.
+///
+/// The unit test in `watch::tests` drives one attempt through a hook, which
+/// proves the superseded classification but bypasses the scheduler entirely.
+/// The scenario is about what the *session* does: a stale attempt must not
+/// publish, and a successor must go on to process the newest inputs. Driven
+/// through `watch::run` with channel readiness, never sleeps-as-assertions.
+#[test]
+fn test_stale_snapshot_successor_publishes_through_real_loop() {
+    let _guard = watch_lock();
+    let root = tempdir("stale-successor");
+    write(&root.join("terse.toml"), MANIFEST);
+    write(&root.join("paper.trs"), "document:\n  title: A Paper\n\nOriginal text.\n");
+
+    let options = WatchOptions { theme_name: "academic".to_string(), tex_only: true, json: false };
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let (reports_tx, reports_rx) = mpsc::channel();
+    let handle = spawn_watch(root.clone(), options, stop_rx, reports_tx);
+
+    let initial = next_report(&reports_rx);
+    assert_eq!(initial.status, AttemptStatus::Success);
+
+    // Two edits in quick succession: the scheduler coalesces them, and
+    // whatever the session finally publishes must be the *latest* content,
+    // never the intermediate state a stale snapshot would have carried.
+    write(&root.join("paper.trs"), "document:\n  title: A Paper\n\nFirst edit.\n");
+    write(&root.join("paper.trs"), "document:\n  title: A Paper\n\nSecond edit.\n");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut published_latest = false;
+    while std::time::Instant::now() < deadline {
+        match reports_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(report) => {
+                // A superseded attempt must never have published.
+                if report.status == AttemptStatus::Success {
+                    let tex = fs::read_to_string(root.join("build/academic/paper.tex")).unwrap();
+                    assert!(
+                        !tex.contains("Original text."),
+                        "a successful attempt after the edits must not republish the original"
+                    );
+                    if tex.contains("Second edit.") {
+                        published_latest = true;
+                        break;
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let _ = stop_tx.send(());
+    let _ = handle.join();
+
+    assert!(
+        published_latest,
+        "a successor attempt must process the newest snapshot and publish it"
+    );
+}

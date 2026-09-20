@@ -19,6 +19,26 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked
 
+  msrv:
+    name: declared MSRV builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Read the floor from the manifest rather than repeating it here, so
+      # the number can never drift from what the package declares.
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      # `rust-toolchain.toml` pins a version and would otherwise override
+      # whatever this job installed, silently testing the pin twice and
+      # leaving the declared floor unverified — which is exactly how
+      # `rust-version = "1.80"` survived while being unbuildable.
+      - run: cargo check --workspace --locked --all-targets
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+
   heavy-tex:
     name: heavy TeX lane (pinned Linux, provisioned by terse toolchain install)
     runs-on: ubuntu-latest

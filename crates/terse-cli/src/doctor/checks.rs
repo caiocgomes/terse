@@ -55,11 +55,27 @@ pub const ALL_CODES: &[&str] = &[
 /// Representative font file per profile font package, looked up through
 /// `kpsewhich` because the generated style loads these fonts by filename
 /// through kpathsea, not through fontconfig.
+/// Every font file a theme's `body.font` can make `\setmainfont` load, not
+/// just the regular weight: `generate_style` names all four variants by
+/// filename, so a distribution missing only the bold-italic would pass a
+/// regular-weight-only probe and then fail at compile time.
 pub const FONT_FILES: &[(&str, &str)] = &[
     ("tgheros", "texgyreheros-regular.otf"),
+    ("tgheros", "texgyreheros-bold.otf"),
+    ("tgheros", "texgyreheros-italic.otf"),
+    ("tgheros", "texgyreheros-bolditalic.otf"),
     ("tgpagella", "texgyrepagella-regular.otf"),
+    ("tgpagella", "texgyrepagella-bold.otf"),
+    ("tgpagella", "texgyrepagella-italic.otf"),
+    ("tgpagella", "texgyrepagella-bolditalic.otf"),
     ("lmodern", "lmroman10-regular.otf"),
+    ("lmodern", "lmroman10-bold.otf"),
+    ("lmodern", "lmroman10-italic.otf"),
+    ("lmodern", "lmroman10-bolditalic.otf"),
     ("libertinus-otf", "LibertinusSerif-Regular.otf"),
+    ("libertinus-otf", "LibertinusSerif-Bold.otf"),
+    ("libertinus-otf", "LibertinusSerif-Italic.otf"),
+    ("libertinus-otf", "LibertinusSerif-BoldItalic.otf"),
 ];
 
 /// Babel language definition file per supported document language.
@@ -399,10 +415,17 @@ fn run_all_in(
                 CODE_PACKAGES,
                 &|missing| install_hint(&tc, host, &missing.join(" ")),
             ));
+            // Every variant of every profile font, not the first match per
+            // token: `\setmainfont` names all four by filename.
             let fonts: Vec<(String, String)> = profile
                 .fonts
                 .iter()
-                .filter_map(|f| FONT_FILES.iter().find(|(tok, _)| tok == f).map(|(_, file)| (f.clone(), file.to_string())))
+                .flat_map(|f| {
+                    FONT_FILES
+                        .iter()
+                        .filter(move |(tok, _)| tok == f)
+                        .map(move |(_, file)| (f.clone(), file.to_string()))
+                })
                 .collect();
             report.checks.push(lookup_check(
                 runner,

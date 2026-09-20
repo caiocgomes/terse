@@ -31,9 +31,17 @@ pub enum ThemeResolveError {
     ExternalResource { span: SourceSpan, property: String },
 }
 
-/// Components with a defined typed property schema. Only `figure` accepts
-/// the `role=wide` selector in v1.
-const KNOWN_COMPONENTS: &[&str] = &[
+/// Components with a defined typed property schema.
+///
+/// Every entry here must have a non-empty [`known_properties`] set: a
+/// component that is recognized but accepts no property would take a
+/// theme's rule, reject each of its properties individually, and read as
+/// "you spelled the property wrong" when the truth is "this component does
+/// nothing yet". `header`, `footer`, `contents`, `equation` and `proof`
+/// were exactly that until `close-verification-gaps` removed them, so they
+/// now fail honestly as unknown components until a later change implements
+/// them.
+pub(crate) const KNOWN_COMPONENTS: &[&str] = &[
     "page",
     "body",
     "heading.1",
@@ -41,31 +49,42 @@ const KNOWN_COMPONENTS: &[&str] = &[
     "heading.3",
     "title",
     "theorem",
-    "proof",
-    "equation",
     "figure",
     "table",
     "citation",
     "bibliography",
-    "header",
-    "footer",
     "logo",
     "watermark",
-    "contents",
 ];
 
-fn known_properties(component: &str) -> &'static [&'static str] {
+pub(crate) fn known_properties(component: &str) -> &'static [&'static str] {
     match component {
         "page" => &["size", "margin", "columns"],
         "body" => &["font", "color"],
         "heading.1" | "heading.2" | "heading.3" => &["weight", "numbering"],
+        "title" => &["layout", "align"],
+        "theorem" => &["style"],
         "figure" => &["align", "default-width", "placement"],
+        "table" => &["padding", "rules", "header"],
         "watermark" => &["kind", "opacity", "angle"],
         "logo" => &["source", "width"],
         "citation" => &["style"],
+        "bibliography" => &["size", "item-spacing"],
         _ => &[],
     }
 }
+
+/// The theorem-like kinds a `theorem[kind=...]` selector may name, in the
+/// semantic model's own order so the index into
+/// [`ResolvedTheme::theorem_style`] matches `TheoremKind`.
+pub(crate) const THEOREM_KINDS: [&str; 6] = [
+    "theorem",
+    "proposition",
+    "lemma",
+    "definition",
+    "example",
+    "remark",
+];
 
 /// Resolves parsed rules against the versioned compiler defaults for
 /// `base`, applying base-component settings before their `role`-specific
@@ -78,21 +97,27 @@ pub fn resolve(
     let mut theme = base;
     theme.name = name.to_string();
     let mut errors = Vec::new();
+    // Where each accepted property was written, so a bounds violation can
+    // be reported at the rule that caused it rather than at a placeholder
+    // position: the requirement is that checking "fails at the offending
+    // property", and a resolved theme alone no longer knows where its
+    // values came from.
+    let mut spans: PropertySpans = PropertySpans::new();
 
     // Apply base rules first, then role rules, so a role override always
     // wins regardless of source order (there is at most one of each kind
     // per component: duplicates were already rejected while parsing).
     for rule in rules.iter().filter(|r| r.role.is_none()) {
-        apply_rule(&mut theme, rule, &mut errors);
+        apply_rule(&mut theme, rule, &mut spans, &mut errors);
     }
     for rule in rules.iter().filter(|r| r.role.is_some()) {
-        apply_rule(&mut theme, rule, &mut errors);
+        apply_rule(&mut theme, rule, &mut spans, &mut errors);
     }
 
     if !errors.is_empty() {
         return Err(errors);
     }
-    validate_bounds(&theme, &mut errors);
+    validate_bounds(&theme, &spans, &mut errors);
     if errors.is_empty() {
         Ok(theme)
     } else {
@@ -100,7 +125,18 @@ pub fn resolve(
     }
 }
 
-fn apply_rule(theme: &mut ResolvedTheme, rule: &RawRule, errors: &mut Vec<ThemeResolveError>) {
+/// Where each accepted `(component, role, property)` was declared. Keyed by
+/// role as well as component because `figure` and `figure[role=wide]` set
+/// the same property name to different values, and a bounds violation must
+/// point at whichever of the two actually caused it.
+type PropertySpans = std::collections::BTreeMap<(String, Option<String>, String), SourceSpan>;
+
+fn apply_rule(
+    theme: &mut ResolvedTheme,
+    rule: &RawRule,
+    spans: &mut PropertySpans,
+    errors: &mut Vec<ThemeResolveError>,
+) {
     if !KNOWN_COMPONENTS.contains(&rule.component.as_str()) {
         errors.push(ThemeResolveError::UnknownComponent {
             span: rule.selector_span,
@@ -109,7 +145,15 @@ fn apply_rule(theme: &mut ResolvedTheme, rule: &RawRule, errors: &mut Vec<ThemeR
         return;
     }
     if let Some(role) = &rule.role {
-        if rule.component != "figure" || role != "wide" {
+        // The attribute key is part of the selector, not decoration:
+        // `figure` is varied by semantic role, `theorem` by kind, and using
+        // the other component's key is as wrong as inventing a value.
+        let supported = match (rule.component.as_str(), rule.role_key) {
+            ("figure", Some("role")) => role == "wide",
+            ("theorem", Some("kind")) => THEOREM_KINDS.contains(&role.as_str()),
+            _ => false,
+        };
+        if !supported {
             errors.push(ThemeResolveError::UnsupportedRole {
                 span: rule.selector_span,
                 component: rule.component.clone(),
@@ -127,8 +171,14 @@ fn apply_rule(theme: &mut ResolvedTheme, rule: &RawRule, errors: &mut Vec<ThemeR
             });
             continue;
         }
-        if let Err(e) = apply_property(theme, &rule.component, &rule.role, prop) {
-            errors.push(e);
+        match apply_property(theme, &rule.component, &rule.role, prop) {
+            Ok(()) => {
+                spans.insert(
+                    (rule.component.clone(), rule.role.clone(), prop.name.clone()),
+                    prop.span,
+                );
+            }
+            Err(e) => errors.push(e),
         }
     }
 }
@@ -205,6 +255,66 @@ fn apply_property(
             }
             theme.citation_style = prop.value.clone();
         }
+        ("title", None, "layout") => {
+            if !["paper", "cover"].contains(&prop.value.as_str()) {
+                return Err(invalid("'paper' or 'cover'"));
+            }
+            theme.title_layout = prop.value.clone();
+        }
+        ("title", None, "align") => {
+            if !["left", "center"].contains(&prop.value.as_str()) {
+                return Err(invalid("'left' or 'center'"));
+            }
+            theme.title_align = prop.value.clone();
+        }
+        // A base `theorem` rule sets every theorem-like kind; a
+        // `theorem[kind=...]` rule overrides exactly one. Base rules are
+        // applied before role rules by `resolve`, so the override wins
+        // regardless of declaration order.
+        ("theorem", role, "style") => {
+            if !["plain", "definition", "remark"].contains(&prop.value.as_str()) {
+                return Err(invalid("'plain', 'definition', or 'remark'"));
+            }
+            match role {
+                None => theme.theorem_style = std::array::from_fn(|_| prop.value.clone()),
+                Some(kind) => {
+                    let index = THEOREM_KINDS
+                        .iter()
+                        .position(|k| *k == kind)
+                        .expect("the role was validated against THEOREM_KINDS");
+                    theme.theorem_style[index] = prop.value.clone();
+                }
+            }
+        }
+        ("table", None, "padding") => {
+            theme.table_padding = prop
+                .value
+                .parse::<f64>()
+                .ok()
+                .ok_or_else(|| invalid("a row-height multiplier like '1.2'"))?;
+        }
+        ("table", None, "rules") => {
+            if !["booktabs", "plain"].contains(&prop.value.as_str()) {
+                return Err(invalid("'booktabs' or 'plain'"));
+            }
+            theme.table_rules = prop.value.clone();
+        }
+        ("table", None, "header") => {
+            if !["bold", "plain"].contains(&prop.value.as_str()) {
+                return Err(invalid("'bold' or 'plain'"));
+            }
+            theme.table_header = prop.value.clone();
+        }
+        ("bibliography", None, "size") => {
+            if !["normal", "small", "footnotesize"].contains(&prop.value.as_str()) {
+                return Err(invalid("'normal', 'small', or 'footnotesize'"));
+            }
+            theme.bibliography_size = prop.value.clone();
+        }
+        ("bibliography", None, "item-spacing") => {
+            theme.bibliography_item_spacing_em =
+                parse_dimension_em(&prop.value).ok_or_else(|| invalid("a dimension like '0.5em'"))?;
+        }
         ("watermark", None, "kind") => {
             if !["none", "internal-use", "draft"].contains(&prop.value.as_str()) {
                 return Err(invalid("'none', 'internal-use', or 'draft'"));
@@ -261,6 +371,11 @@ fn parse_dimension_cm(v: &str) -> Option<f64> {
     n.parse::<f64>().ok()
 }
 
+fn parse_dimension_em(v: &str) -> Option<f64> {
+    let n = v.strip_suffix("em")?;
+    n.parse::<f64>().ok()
+}
+
 /// Selects a TeX-distributed font by filename token; no host-family
 /// lookup, matching the "Portable font and asset selection" requirement.
 fn parse_font_token(v: &str) -> Option<String> {
@@ -290,11 +405,24 @@ fn is_external_resource(v: &str) -> bool {
     v.contains("://") || v.starts_with('/') || v.starts_with('\\') || v.split('/').any(|seg| seg == "..")
 }
 
-fn validate_bounds(theme: &ResolvedTheme, errors: &mut Vec<ThemeResolveError>) {
+fn validate_bounds(theme: &ResolvedTheme, spans: &PropertySpans, errors: &mut Vec<ThemeResolveError>) {
     let zero_span = SourceSpan::new(crate::source::FileId(0), 0, 0);
+    // A bound is violated by a value, and every value that a theme can put
+    // out of range was written somewhere; fall back to the placeholder only
+    // for a compiler default, which shipped defaults never violate.
+    let at = |component: &str, role: Option<&str>, property: &str| {
+        spans
+            .get(&(
+                component.to_string(),
+                role.map(str::to_string),
+                property.to_string(),
+            ))
+            .copied()
+            .unwrap_or(zero_span)
+    };
     if theme.page_margin_cm <= 0.0 || theme.page_margin_cm * 2.0 >= 21.0 {
         errors.push(ThemeResolveError::OutOfBounds {
-            span: zero_span,
+            span: at("page", None, "margin"),
             component: "page".to_string(),
             property: "margin".to_string(),
             reason: "margins must leave a usable content box on the page",
@@ -302,7 +430,7 @@ fn validate_bounds(theme: &ResolvedTheme, errors: &mut Vec<ThemeResolveError>) {
     }
     if theme.figure_default_width_pct == 0 || theme.figure_default_width_pct > 100 {
         errors.push(ThemeResolveError::OutOfBounds {
-            span: zero_span,
+            span: at("figure", None, "default-width"),
             component: "figure".to_string(),
             property: "default-width".to_string(),
             reason: "width must be within the container (1-100%)",
@@ -310,7 +438,7 @@ fn validate_bounds(theme: &ResolvedTheme, errors: &mut Vec<ThemeResolveError>) {
     }
     if theme.figure_wide_width_pct == 0 || theme.figure_wide_width_pct > 100 {
         errors.push(ThemeResolveError::OutOfBounds {
-            span: zero_span,
+            span: at("figure", Some("wide"), "default-width"),
             component: "figure".to_string(),
             property: "default-width".to_string(),
             reason: "width must be within the container (1-100%)",
@@ -318,15 +446,34 @@ fn validate_bounds(theme: &ResolvedTheme, errors: &mut Vec<ThemeResolveError>) {
     }
     if !(0.0..=0.3).contains(&theme.watermark_opacity) {
         errors.push(ThemeResolveError::OutOfBounds {
-            span: zero_span,
+            span: at("watermark", None, "opacity"),
             component: "watermark".to_string(),
             property: "opacity".to_string(),
             reason: "watermark opacity must stay bounded so authored content remains readable",
         });
     }
+    // Row height and bibliography spacing are the two new numeric knobs:
+    // a nonpositive stretch collapses rows onto each other, and a negative
+    // item spacing pulls entries into the one above.
+    if theme.table_padding <= 0.0 || theme.table_padding > 5.0 {
+        errors.push(ThemeResolveError::OutOfBounds {
+            span: at("table", None, "padding"),
+            component: "table".to_string(),
+            property: "padding".to_string(),
+            reason: "row padding must keep table rows legible and on the page (0-5)",
+        });
+    }
+    if theme.bibliography_item_spacing_em < 0.0 || theme.bibliography_item_spacing_em > 5.0 {
+        errors.push(ThemeResolveError::OutOfBounds {
+            span: at("bibliography", None, "item-spacing"),
+            component: "bibliography".to_string(),
+            property: "item-spacing".to_string(),
+            reason: "bibliography item spacing must be nonnegative and bounded (0-5em)",
+        });
+    }
     if theme.body_color == "ffffff" {
         errors.push(ThemeResolveError::OutOfBounds {
-            span: zero_span,
+            span: at("body", None, "color"),
             component: "body".to_string(),
             property: "color".to_string(),
             reason: "body text color must not match the page background",

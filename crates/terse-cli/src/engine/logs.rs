@@ -69,12 +69,99 @@ pub fn interpret_failure(failure: &CompileFailure) -> Diagnostic {
             related: Vec::new(),
             help: Some("use a character present in the theme's fonts, or declare a font that covers it".to_string()),
         },
+        CompileFailure::UndefinedReferences => Diagnostic {
+            severity: Severity::Error,
+            code: "E-LATEX-015",
+            message: "the document still has undefined references or citations after the engine converged".to_string(),
+            primary: None,
+            related: Vec::new(),
+            help: Some(
+                "check `\\ref`/`\\cite` targets in raw TeX blocks; authored cross-references and citations are validated before generation".to_string(),
+            ),
+        },
     }
+}
+
+/// Whether the *settled* document pass still reports unresolved
+/// references or citations.
+///
+/// Only the final XeLaTeX pass is inspected, which is the one the rerun
+/// loop stopped on. Every intermediate pass of an ordinary citation build
+/// legitimately reports undefined references, because `.aux` and `.bbl`
+/// have not been read back yet — scanning all passes (as the missing-glyph
+/// check reasonably does, glyph coverage being pass-independent) would
+/// fail every document that cites anything.
+pub fn has_undefined_references(passes: &[crate::engine::PassResult]) -> bool {
+    let Some(last) = passes
+        .iter()
+        .rev()
+        .find(|p| p.kind == crate::engine::PassKind::Xelatex)
+    else {
+        return false;
+    };
+    let log = String::from_utf8_lossy(&last.outcome.stdout);
+    // Matched per line, not across the whole log: a converged build's log
+    // mentions citations in many places and "undefined" in unrelated
+    // engine chatter, so a whole-log conjunction reports a failure for
+    // every document that cites anything. The engine wraps long lines, so
+    // the summary warnings are matched as whole phrases and the per-item
+    // form is matched by its two markers co-occurring on one line.
+    log.lines().any(|line| {
+        line.contains("There were undefined references")
+            || line.contains("There were undefined citations")
+            || (line.contains("Citation") && line.contains("undefined"))
+            || (line.contains("Reference") && line.contains("undefined"))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{PassKind, PassResult, ProcessOutcome};
+
+    fn pass(kind: PassKind, log: &str) -> PassResult {
+        PassResult {
+            kind,
+            outcome: ProcessOutcome::success_with_log(log.as_bytes().to_vec()),
+        }
+    }
+
+    #[test]
+    fn test_undefined_references_scan_inspects_only_the_final_pass() {
+        // Every intermediate XeLaTeX pass of a citation build reports
+        // undefined references before `.aux`/`.bbl` are read back, so a
+        // scan over all passes would fail every ordinary citation build.
+        let converged = vec![
+            pass(PassKind::Xelatex, "LaTeX Warning: There were undefined references.\nPlease (re)run\n"),
+            pass(PassKind::Biber, "biber output"),
+            pass(PassKind::Xelatex, "all resolved\n"),
+        ];
+        assert!(
+            !has_undefined_references(&converged),
+            "references that resolve by the final pass are not a failure"
+        );
+
+        let unresolved = vec![
+            pass(PassKind::Xelatex, "first\n"),
+            pass(PassKind::Xelatex, "LaTeX Warning: There were undefined references.\n"),
+        ];
+        assert!(has_undefined_references(&unresolved), "the settled pass still reports them");
+
+        let undefined_citation = vec![pass(
+            PassKind::Xelatex,
+            "LaTeX Warning: Citation 'smith2020' on page 1 undefined on input line 4.\n",
+        )];
+        assert!(has_undefined_references(&undefined_citation));
+
+        // A Biber pass running last (no XeLaTeX after it) must not be
+        // mistaken for the settled document pass.
+        let biber_last = vec![
+            pass(PassKind::Xelatex, "clean\n"),
+            pass(PassKind::Biber, "There were undefined references.\n"),
+        ];
+        assert!(!has_undefined_references(&biber_last));
+    }
+
 
     #[test]
     fn test_tool_start_failure_has_no_primary_span() {

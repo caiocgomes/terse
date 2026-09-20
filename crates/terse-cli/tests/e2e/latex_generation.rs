@@ -212,8 +212,14 @@ fn test_portable_output_compiles_without_terse() {
     assert!(run_xelatex(&portable).success());
     assert!(run_xelatex(&portable).success());
     let edited_text = crate::common::pdf::extract_text(&pdf);
+    // Whitespace-normalized: the claim is that the edited prose survives a
+    // recompile, not that it occupies one line. Since the `title` component
+    // made alignment a real setting, the title is set ragged rather than
+    // justified, so a title long enough to overrun the column now wraps at
+    // a space instead of overflowing into the margin.
+    let flat: String = edited_text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        edited_text.contains("A Complete Terse Paper (Manually Edited)"),
+        flat.contains("A Complete Terse Paper (Manually Edited)"),
         "the manual prose edit must survive a conventional recompile with no Terse involved:\n{edited_text}"
     );
 }
@@ -230,4 +236,33 @@ fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) {
             fs::copy(&path, &target).unwrap();
         }
     }
+}
+
+#[test]
+#[ignore = "requires a local XeLaTeX distribution"]
+fn test_raw_tex_undefined_reference_fails_against_real_engine() {
+    // The authored `{ref:}` form is barred before generation by
+    // `E-XREF-001`, so the only way an undefined reference reaches the
+    // engine is a raw `tex:` block. XeLaTeX exits 0 and writes a PDF
+    // containing `??`; publishing that would be silently broken output.
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir("undefined-ref-real");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        "document:\n  title: \"T\"\n\nA paragraph.\n\ntex:\n  See \\ref{nope}.\n",
+    )
+    .unwrap();
+
+    let code = terse_cli::run(["terse", "build", "--require-pdf"], &tmp);
+    assert_eq!(code, 3, "an undefined reference must fail rather than publish a PDF with ??");
+    assert!(
+        !tmp.join("build").join("academic").join("paper.pdf").exists(),
+        "no PDF is published for a document whose references never resolve"
+    );
 }

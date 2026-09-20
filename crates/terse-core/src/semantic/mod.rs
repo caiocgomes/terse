@@ -149,7 +149,50 @@ pub enum NodeKind {
 /// is [`validate_citations`], run separately by the application entrypoint
 /// once the project-wide alias namespace is known.
 pub fn lower(blocks: Vec<TopBlock>, file_id: FileId) -> Result<ParsedModule, Diagnostic> {
-    lower_impl(blocks, file_id, true)
+    let module = lower_impl(blocks, file_id, true)?;
+    check_node_budget(&module)?;
+    Ok(module)
+}
+
+/// The largest number of semantic nodes one compiled document may contain,
+/// counting nested list continuations and theorem/proof bodies. The
+/// complete acceptance fixture is well under a hundred; a long book with
+/// every section included is thousands. 100_000 leaves that headroom
+/// intact while bounding the work every later stage (projection, LaTeX
+/// emission, source mapping) performs per node, each of which walks this
+/// tree at least once.
+pub const MAX_NODES: usize = 100_000;
+
+fn count_nodes(nodes: &[Node]) -> usize {
+    nodes
+        .iter()
+        .map(|node| {
+            1 + match &node.kind {
+                NodeKind::List { items, .. } => items
+                    .iter()
+                    .map(|item| count_nodes(&item.continuation))
+                    .sum::<usize>(),
+                NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => count_nodes(body),
+                _ => 0,
+            }
+        })
+        .sum()
+}
+
+/// Refuses a document whose node count exceeds [`MAX_NODES`], before any
+/// artifact plan exists. Counted after lowering rather than during it so
+/// the limit applies to the expanded, project-wide tree an include graph
+/// can multiply, not to any single module in isolation.
+fn check_node_budget(module: &ParsedModule) -> Result<(), Diagnostic> {
+    let total = count_nodes(&module.blocks);
+    if total > MAX_NODES {
+        return Err(Diagnostic::error(
+            "E-LIMIT-004",
+            format!("document has {total} semantic nodes, exceeding the {MAX_NODES}-node limit"),
+            SourceSpan::new(module.file_id, 0, 0),
+        ));
+    }
+    Ok(())
 }
 
 /// Lowers a *single, unexpanded* module without validating cross-reference
