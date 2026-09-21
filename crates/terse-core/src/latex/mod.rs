@@ -305,6 +305,10 @@ fn render_title_material(metadata: &DocumentMetadata, out: &mut String) {
     if let Some(date) = &metadata.date {
         out.push_str(&format!("\\TerseDate{{{}}}\n", escape::escape_text(date)));
     }
+    // The block closes here, before the abstract: under the plain default
+    // closing it runs `\maketitle`, which must precede `abstract`. The
+    // order is the same under every theme, so the body stays theme-blind.
+    out.push_str("\\end{TerseTitleBlock}\n");
     if !metadata.abstract_blocks.is_empty() {
         out.push_str("\\begin{TerseAbstract}\n");
         for paragraph in &metadata.abstract_blocks {
@@ -322,7 +326,6 @@ fn render_title_material(metadata: &DocumentMetadata, out: &mut String) {
             .join(", ");
         out.push_str(&format!("\\TerseKeywords{{{joined}}}\n"));
     }
-    out.push_str("\\end{TerseTitleBlock}\n");
 }
 
 fn render_inlines(inlines: &[Inline], symbols: &SymbolTable, out: &mut String) {
@@ -605,13 +608,32 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
         ),
         None => String::new(),
     };
-    // Page geometry. Without this the class default (letter, wide margins)
-    // silently wins over whatever the theme declares.
-    let geometry = format!(
-        "\\RequirePackage[{paper},margin={margin}cm]{{geometry}}\n",
-        paper = if theme.page_size == "letter" { "letterpaper" } else { "a4paper" },
-        margin = theme.page_margin_cm,
-    );
+    // Page geometry, only when the theme asks for it: with no page token
+    // the class's own layout (letter) applies, which is the plain default.
+    // A paper token alone must change *only* the paper, so it reproduces
+    // the text block `size10.clo` computes for that paper (345pt wide on
+    // any paper; 550pt tall on letter, 598pt on A4, measured against the
+    // pinned engine) rather than `geometry`'s wider defaults. A margin
+    // replaces the block, on the given paper or the class's.
+    let geometry = match (theme.page_size.as_deref(), theme.page_margin_cm) {
+        (None, None) => String::new(),
+        (size, Some(margin)) => format!(
+            "\\RequirePackage[{paper}margin={margin}cm]{{geometry}}\n",
+            paper = match size {
+                Some("letter") => "letterpaper,",
+                Some(_) => "a4paper,",
+                None => "",
+            },
+        ),
+        (Some(size), None) => {
+            let (paper, height) = if size == "letter" {
+                ("letterpaper", "550pt")
+            } else {
+                ("a4paper", "598pt")
+            };
+            format!("\\RequirePackage[{paper},textwidth=345pt,textheight={height},centering]{{geometry}}\n")
+        }
+    };
     // Two-column is a class option, and the class line lives in the
     // theme-blind body, so the switch has to happen from the style file.
     // `\twocolumn` keeps LaTeX's native float machinery, which `multicol`
@@ -621,10 +643,21 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
     } else {
         ""
     };
-    let [regular, bold, italic, bold_italic] = font_files_for(&theme.body_font);
-    let main_font = format!(
-        "\\setmainfont{{{regular}}}[BoldFont={bold},ItalicFont={italic},BoldItalicFont={bold_italic}]\n"
-    );
+    // A font token is what loads `fontspec`; without one the kernel's own
+    // family (Latin Modern under XeLaTeX, which the engine embeds without
+    // any package) is the plain default.
+    let font_setup = match theme.body_font.as_deref() {
+        Some(token) => {
+            let [regular, bold, italic, bold_italic] = font_files_for(token);
+            format!(
+                "\\RequirePackage{{fontspec}}\n\
+\\RequirePackage{{{package}}}\n\
+\\setmainfont{{{regular}}}[BoldFont={bold},ItalicFont={italic},BoldItalicFont={bold_italic}]\n",
+                package = font_package_for(token),
+            )
+        }
+        None => String::new(),
+    };
     let body_color = format!(
         "\\definecolor{{TerseBodyColor}}{{HTML}}{{{hex}}}\n\\AtBeginDocument{{\\color{{TerseBodyColor}}}}\n",
         hex = theme.body_color.to_uppercase(),
@@ -678,24 +711,51 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
         ),
         None => "\\newcommand{\\TerseLogo}{}\n".to_string(),
     };
-    let heading_sizes = ["\\Large", "\\large", "\\normalsize"];
-    let heading_counters = ["terseheadingone", "terseheadingtwo", "terseheadingthree"];
+    // Headings are the class's own sectioning commands: numbering, spacing
+    // and the section counters come from `article`, so a document with no
+    // theme reads like one written by hand. `none` is the unnumbered form
+    // (the body's `\phantomsection\label` still gives it an anchor),
+    // `roman` changes only the counter's presentation, and a non-default
+    // weight re-issues the class's `\@startsection` definition
+    // (`article.cls`, `\section`..`\subsubsection`) with the font argument
+    // changed, which needs no package.
     let heading_macros = ["TerseHeadingOne", "TerseHeadingTwo", "TerseHeadingThree"];
+    let section_commands = ["section", "subsection", "subsubsection"];
+    let class_fonts = ["\\normalfont\\Large", "\\normalfont\\large", "\\normalfont\\normalsize"];
+    let class_spacing = [
+        ("{-3.5ex \\@plus -1ex \\@minus -.2ex}", "{2.3ex \\@plus.2ex}"),
+        ("{-3.25ex\\@plus -1ex \\@minus -.2ex}", "{1.5ex \\@plus .2ex}"),
+        ("{-3.25ex\\@plus -1ex \\@minus -.2ex}", "{1.5ex \\@plus .2ex}"),
+    ];
     let mut headings = String::new();
     for i in 0..3 {
-        let counter = heading_counters[i];
-        headings.push_str(&format!("\\newcounter{{{counter}}}\n"));
-        let number_prefix = match theme.heading_numbering[i].as_str() {
-            "decimal" => format!("\\arabic{{{counter}}}.\\ "),
-            "roman" => format!("\\Roman{{{counter}}}.\\ "),
-            _ => String::new(),
-        };
+        let command = section_commands[i];
+        let star = if theme.heading_numbering[i] == "none" { "*" } else { "" };
         headings.push_str(&format!(
-            "\\newcommand{{\\{macro_name}}}[1]{{\\refstepcounter{{{counter}}}\\par\\vspace{{1em}}{{{size}{weight}\\selectfont {number_prefix}#1}}\\par}}\n",
+            "\\newcommand{{\\{macro_name}}}[1]{{\\{command}{star}{{#1}}}}\n",
             macro_name = heading_macros[i],
-            size = heading_sizes[i],
-            weight = heading_weight_command(&theme.heading_weight[i]),
         ));
+        if theme.heading_numbering[i] == "roman" {
+            let prefix = if i == 0 {
+                String::new()
+            } else {
+                format!("\\the{}.", section_commands[i - 1])
+            };
+            headings.push_str(&format!(
+                "\\renewcommand{{\\the{command}}}{{{prefix}\\Roman{{{command}}}}}\n"
+            ));
+        }
+        if theme.heading_weight[i] != "bold" {
+            let (before, after) = class_spacing[i];
+            // Wrapped explicitly: an earlier block in this file ends with
+            // `\makeatother`, so `@` is not a letter here by default.
+            headings.push_str(&format!(
+                "\\makeatletter\n\\renewcommand\\{command}{{\\@startsection{{{command}}}{{{level}}}{{\\z@}}{before}{after}{{{font}{weight}}}}}\n\\makeatother\n",
+                level = i + 1,
+                font = class_fonts[i],
+                weight = heading_weight_command(&theme.heading_weight[i]),
+            ));
+        }
     }
     let figure_widths = format!(
         "\\newcommand{{\\TerseFigureWidth}}{{{default:.3}\\linewidth}}\n\\newcommand{{\\TerseFigureWideWidth}}{{{wide:.3}\\linewidth}}\n",
@@ -705,23 +765,60 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
     // The title block is the one place a theme controls page *layout*: the
     // cover variant opens with the logo and closes with a page break, and
     // is therefore also the only sensible invocation point for `\TerseLogo`.
-    let title_align = if theme.title_align == "left" {
-        "\\raggedright"
+    //
+    // The plain default (paper layout, centered) is the class's own
+    // `\maketitle`: the title macros collect `\title`/`\author`/`\date`
+    // and the block runs `\maketitle` when it closes. Authors accumulate
+    // into one list joined by `\and`, each on its own `tabular` cell the
+    // way `article` lays them out, with the affiliation on a second line
+    // when there is one. The date is cleared when the block opens so a
+    // document with no date never gets `\today`. A cover, or a left-aligned
+    // paper title, keeps the custom block: `\maketitle` can neither place a
+    // logo nor end with a page break.
+    // `\makeatletter` is explicit here because the figure controls above
+    // end with `\makeatother`, which stops `@` being a letter for the rest
+    // of this file.
+    let title_block = if theme.title_layout == "paper" && theme.title_align == "center" {
+        "\\makeatletter\n\
+\\newenvironment{TerseTitleBlock}{\\date{}\\gdef\\TerseAuthorList{}}{\\maketitle}\n\
+\\newcommand{\\TerseTitle}[1]{\\title{#1}}\n\
+\\newcommand{\\TerseSubtitle}[1]{\\g@addto@macro\\@title{\\\\[0.5ex]\\large #1}}\n\
+\\newcommand{\\TerseAuthor}[2]{%\n\
+  \\ifx\\TerseAuthorList\\@empty\\else\\g@addto@macro\\TerseAuthorList{\\and}\\fi\n\
+  \\g@addto@macro\\TerseAuthorList{#1}%\n\
+  \\if\\relax\\detokenize{#2}\\relax\\else\\g@addto@macro\\TerseAuthorList{\\\\#2}\\fi\n\
+  \\author{\\TerseAuthorList}}\n\
+\\newcommand{\\TerseAffiliation}[1]{\\g@addto@macro\\TerseAuthorList{\\\\#1}\\author{\\TerseAuthorList}}\n\
+\\newcommand{\\TerseDate}[1]{\\date{#1}}\n\
+\\newenvironment{TerseAbstract}{\\begin{abstract}}{\\end{abstract}}\n\
+\\makeatother\n"
+            .to_string()
     } else {
-        "\\centering"
-    };
-    let title_block = if theme.title_layout == "cover" {
-        format!(
-            "\\newenvironment{{TerseTitleBlock}}\
+        let title_align = if theme.title_align == "left" {
+            "\\raggedright"
+        } else {
+            "\\centering"
+        };
+        let block = if theme.title_layout == "cover" {
+            format!(
+                "\\newenvironment{{TerseTitleBlock}}\
 {{\\begingroup{title_align}\\vspace*{{2cm}}\\TerseLogo\\par\\bigskip}}\
 {{\\par\\endgroup\\clearpage}}\n"
-        )
-    } else {
-        format!(
-            "\\newenvironment{{TerseTitleBlock}}\
+            )
+        } else {
+            format!(
+                "\\newenvironment{{TerseTitleBlock}}\
 {{\\begingroup{title_align}}}\
 {{\\par\\endgroup\\bigskip}}\n"
-        )
+            )
+        };
+        block
+            + "\\newcommand{\\TerseTitle}[1]{{\\Huge\\bfseries #1\\par}}\n\
+\\newcommand{\\TerseSubtitle}[1]{{\\Large #1\\par}}\n\
+\\newcommand{\\TerseAuthor}[2]{{\\large #1\\par}\\if\\relax\\detokenize{#2}\\relax\\else{\\normalsize #2\\par}\\fi}\n\
+\\newcommand{\\TerseAffiliation}[1]{{\\normalsize #1\\par}}\n\
+\\newcommand{\\TerseDate}[1]{{\\normalsize #1\\par}}\n\
+\\newenvironment{TerseAbstract}{\\par\\bigskip\\noindent\\textbf{Abstract.}\\ }{\\par\\bigskip}\n"
     };
     let theorem_setup: String = THEOREM_ENVIRONMENTS
         .iter()
@@ -751,9 +848,7 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
         "% Generated by terse for theme '{name}'. Do not edit by hand.\n\
 \\NeedsTeXFormat{{LaTeX2e}}\n\
 \\ProvidesPackage{{terse-style}}\n\
-\\RequirePackage{{fontspec}}\n\
-\\RequirePackage{{{font_package}}}\n\
-{main_font}\
+{font_setup}\
 {geometry}\
 \\RequirePackage{{xcolor}}\n\
 \\RequirePackage{{amsmath}}\n\
@@ -775,16 +870,9 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
 {theorem_setup}\
 \\newenvironment{{TerseEquation}}{{\\begin{{equation}}}}{{\\end{{equation}}}}\n\
 {title_block}\
-\\newcommand{{\\TerseTitle}}[1]{{{{\\Huge\\bfseries #1\\par}}}}\n\
-\\newcommand{{\\TerseSubtitle}}[1]{{{{\\Large #1\\par}}}}\n\
-\\newcommand{{\\TerseAuthor}}[2]{{{{\\large #1\\par}}}}\n\
-\\newcommand{{\\TerseAffiliation}}[1]{{{{\\normalsize #1\\par}}}}\n\
-\\newcommand{{\\TerseDate}}[1]{{{{\\normalsize #1\\par}}}}\n\
-\\newenvironment{{TerseAbstract}}{{\\par\\bigskip\\noindent\\textbf{{Abstract.}}\\ }}{{\\par\\bigskip}}\n\
 \\newcommand{{\\TerseKeywords}}[1]{{{{\\noindent\\textit{{Keywords: }}#1\\par}}}}\n\
 \\newcommand{{\\Terseref}}[1]{{\\ref{{#1}}}}\n",
         name = theme.name,
-        font_package = font_package_for(&theme.body_font),
     )
 }
 
@@ -860,5 +948,216 @@ mod tests {
         assert!(out1.contains("\\TerseHeadingOne{Intro}"));
         assert!(out1.contains("50\\% done \\& counting."));
         assert!(!out1.contains("\\today"));
+    }
+
+    fn resolve_str(text: &str) -> ResolvedTheme {
+        let file = crate::source::SourceFile::new(FileId(0), "t.theme", text.as_bytes().to_vec()).unwrap();
+        theme::resolve_theme("academic", &file).expect("test theme resolves")
+    }
+
+    fn metadata_module(date: Option<&str>, subtitle: Option<&str>) -> ParsedModule {
+        ParsedModule {
+            file_id: FileId(0),
+            metadata: Some(DocumentMetadata {
+                title: "A Paper".to_string(),
+                subtitle: subtitle.map(str::to_string),
+                authors: vec![
+                    Author {
+                        name: "Ada Lovelace".to_string(),
+                        affiliation: Some(crate::semantic::Affiliation::Single("Analytical Engines".to_string())),
+                    },
+                    Author {
+                        name: "Charles Babbage".to_string(),
+                        affiliation: None,
+                    },
+                ],
+                affiliations: vec![],
+                date: date.map(str::to_string),
+                language: "en".to_string(),
+                abstract_blocks: vec![vec![Inline::Text("An abstract.".to_string())]],
+                keywords: vec!["engines".to_string()],
+            }),
+            references: vec![],
+            blocks: vec![],
+        }
+    }
+
+    // ----- plain-latex-default: style emission -----
+
+    /// Scenario "No theme is the plain article": with no font or page
+    /// token the style loads neither `fontspec` nor `geometry`, while the
+    /// always-loaded content packages stay (they do not change the look
+    /// and keep the body theme-blind).
+    #[test]
+    fn test_default_style_has_no_font_or_geometry() {
+        let style = generate_style(&theme::academic(), &[], None);
+        for absent in ["fontspec", "\\setmainfont", "geometry", "libertinus", "lmodern", "tgheros"] {
+            assert!(!style.contains(absent), "plain default must not emit {absent}:\n{style}");
+        }
+        for present in ["hyperref", "amsthm", "graphicx", "booktabs", "amsmath", "enumitem"] {
+            assert!(style.contains(&format!("\\RequirePackage{{{present}}}")), "{present} stays loaded");
+        }
+    }
+
+    /// A font token is what pulls `fontspec`, the font package and the
+    /// filename-based `\setmainfont`.
+    #[test]
+    fn test_font_token_pulls_fontspec() {
+        let style = generate_style(&resolve_str("body:\n  font: libertinus-otf\n"), &[], None);
+        assert!(style.contains("\\RequirePackage{fontspec}"));
+        assert!(style.contains("\\RequirePackage{libertinus-otf}"));
+        assert!(style.contains("\\setmainfont{LibertinusSerif-Regular.otf}"));
+        let fontspec_at = style.find("\\RequirePackage{fontspec}").unwrap();
+        let font_pkg_at = style.find("\\RequirePackage{libertinus-otf}").unwrap();
+        let main_at = style.find("\\setmainfont").unwrap();
+        assert!(fontspec_at < font_pkg_at && font_pkg_at < main_at, "fontspec, package, then \\setmainfont");
+    }
+
+    /// Scenario "Page size alone changes only the paper": a size-only
+    /// theme reproduces the class's own text block on that paper (345pt
+    /// wide; 550pt tall on letter, 598pt on A4, as `size10.clo` computes
+    /// them), and a margin overrides the block instead.
+    #[test]
+    fn test_page_size_alone_reproduces_class_layout() {
+        let plain = generate_style(&theme::academic(), &[], None);
+        let a4 = generate_style(&resolve_str("page:\n  size: a4\n"), &[], None);
+        let a4_line = "\\RequirePackage[a4paper,textwidth=345pt,textheight=598pt,centering]{geometry}\n";
+        assert!(a4.contains(a4_line), "got:\n{a4}");
+        assert_eq!(a4.replace(a4_line, ""), plain, "the geometry line is the only difference");
+
+        let letter = generate_style(&resolve_str("page:\n  size: letter\n"), &[], None);
+        assert!(letter.contains("[letterpaper,textwidth=345pt,textheight=550pt,centering]{geometry}"));
+
+        let margin_only = generate_style(&resolve_str("page:\n  margin: 2.5cm\n"), &[], None);
+        assert!(margin_only.contains("\\RequirePackage[margin=2.5cm]{geometry}"), "got:\n{margin_only}");
+        assert!(!margin_only.contains("textwidth"));
+
+        let both = generate_style(&resolve_str("page:\n  size: a4\n  margin: 2.5cm\n"), &[], None);
+        assert!(both.contains("\\RequirePackage[a4paper,margin=2.5cm]{geometry}"), "got:\n{both}");
+        assert!(!both.contains("textwidth"));
+    }
+
+    // ----- plain-latex-default: headings -----
+
+    /// Scenario "No theme is the plain article": headings are the class's
+    /// own sectioning commands, with no private counters or font switches.
+    #[test]
+    fn test_headings_delegate_to_sectioning_commands() {
+        let style = generate_style(&theme::academic(), &[], None);
+        assert!(style.contains("\\newcommand{\\TerseHeadingOne}[1]{\\section{#1}}"), "got:\n{style}");
+        assert!(style.contains("\\newcommand{\\TerseHeadingTwo}[1]{\\subsection{#1}}"));
+        assert!(style.contains("\\newcommand{\\TerseHeadingThree}[1]{\\subsubsection{#1}}"));
+        assert!(!style.contains("\\newcounter{terseheading"));
+        assert!(!style.contains("\\selectfont "));
+        assert!(!style.contains("\\@startsection"), "the class definition is untouched by default");
+    }
+
+    /// Scenario "Heading numbering is disabled": the unnumbered form; the
+    /// body's own `\phantomsection\label` keeps the anchor.
+    #[test]
+    fn test_numbering_none_uses_starred_form() {
+        let style = generate_style(&resolve_str("heading.1:\n  numbering: none\n"), &[], None);
+        assert!(style.contains("\\newcommand{\\TerseHeadingOne}[1]{\\section*{#1}}"), "got:\n{style}");
+        assert!(style.contains("\\newcommand{\\TerseHeadingTwo}[1]{\\subsection{#1}}"), "other levels unchanged");
+    }
+
+    #[test]
+    fn test_numbering_roman_redefines_thesection() {
+        let style = generate_style(&resolve_str("heading.1:\n  numbering: roman\n"), &[], None);
+        assert!(style.contains("\\renewcommand{\\thesection}{\\Roman{section}}"), "got:\n{style}");
+        assert!(!style.contains("\\thesubsection"), "only the level that asked for it");
+
+        let level_two = generate_style(&resolve_str("heading.2:\n  numbering: roman\n"), &[], None);
+        assert!(
+            level_two.contains("\\renewcommand{\\thesubsection}{\\thesection.\\Roman{subsection}}"),
+            "the parent prefix is kept:\n{level_two}"
+        );
+        assert!(!generate_style(&theme::academic(), &[], None).contains("\\renewcommand{\\thesection}"));
+    }
+
+    /// A non-default weight re-issues the class's `\@startsection`
+    /// definition with the font argument changed; no package is added.
+    #[test]
+    fn test_heading_weight_redefines_startsection() {
+        let style = generate_style(&resolve_str("heading.1:\n  weight: italic\n"), &[], None);
+        assert!(
+            style.contains("\\renewcommand\\section{\\@startsection{section}{1}{\\z@}"),
+            "got:\n{style}"
+        );
+        assert!(style.contains("{\\normalfont\\Large\\itshape}}"));
+        assert!(!style.contains("\\renewcommand\\subsection"), "only the level that asked for it");
+        assert!(!style.contains("titlesec"));
+
+        let bold = generate_style(&resolve_str("heading.1:\n  weight: bold\n"), &[], None);
+        assert!(!bold.contains("\\@startsection"), "bold is the class default");
+    }
+
+    // ----- plain-latex-default: title block -----
+
+    /// Scenario "Default title block is maketitle".
+    #[test]
+    fn test_paper_title_block_uses_maketitle() {
+        let style = generate_style(&theme::academic(), &[], None);
+        assert!(
+            style.contains("\\newenvironment{TerseTitleBlock}{\\date{}"),
+            "the block opens by clearing the date so \\maketitle never inserts \\today:\n{style}"
+        );
+        assert!(style.contains("{\\maketitle}"), "the block closes with \\maketitle");
+        assert!(style.contains("\\newcommand{\\TerseTitle}[1]{\\title{#1}}"));
+        assert!(style.contains("\\newcommand{\\TerseDate}[1]{\\date{#1}}"));
+        assert!(style.contains("\\newenvironment{TerseAbstract}{\\begin{abstract}}{\\end{abstract}}"));
+        // Authors accumulate into `\author`, separated by `\and`, each
+        // carrying its affiliation on a new line when it has one.
+        assert!(style.contains("\\and"), "authors are joined with \\and");
+        assert!(style.contains("\\if\\relax\\detokenize{#2}\\relax"), "an empty affiliation appends nothing");
+        assert!(!style.contains("\\Huge\\bfseries"), "no hand-made title typography by default");
+        // The subtitle joins the title.
+        assert!(style.contains("\\g@addto@macro\\@title{\\\\[0.5ex]\\large #1}"), "got:\n{style}");
+    }
+
+    #[test]
+    fn test_missing_date_emits_no_today() {
+        let body = generate_document(&metadata_module(None, None), &theme::academic());
+        let style = generate_style(&theme::academic(), &[], None);
+        assert!(!body.contains("\\today"));
+        assert!(!style.contains("\\today"));
+        assert!(!body.contains("\\TerseDate"), "no date macro for a dateless document");
+        let dated = generate_document(&metadata_module(Some("1843-01-01"), None), &theme::academic());
+        assert!(dated.contains("\\TerseDate{1843-01-01}"));
+    }
+
+    /// The cover layout, and a left-aligned paper title, keep the custom
+    /// block: `\maketitle` cannot place a logo or end with a page break.
+    #[test]
+    fn test_cover_layout_keeps_custom_block() {
+        let cover = generate_style(&resolve_str("title:\n  layout: cover\n"), &[], None);
+        assert!(cover.contains("\\vspace*{2cm}\\TerseLogo\\par\\bigskip"), "got:\n{cover}");
+        assert!(cover.contains("\\clearpage"));
+        assert!(cover.contains("\\newcommand{\\TerseTitle}[1]{{\\Huge\\bfseries #1\\par}}"));
+        assert!(!cover.contains("\\maketitle"));
+
+        let left = generate_style(&resolve_str("title:\n  align: left\n"), &[], None);
+        assert!(left.contains("\\raggedright"), "got:\n{left}");
+        assert!(!left.contains("\\maketitle"));
+    }
+
+    /// Design D5: the abstract and keywords follow the title block, because
+    /// `\maketitle` must run before `abstract`. Identical under every theme.
+    #[test]
+    fn test_abstract_follows_title_block() {
+        let module = metadata_module(Some("1843-01-01"), Some("A Subtitle"));
+        let body = generate_document(&module, &theme::academic());
+        let end_block = body.find("\\end{TerseTitleBlock}").expect("block closes");
+        let abstract_at = body.find("\\begin{TerseAbstract}").expect("abstract present");
+        let keywords_at = body.find("\\TerseKeywords{engines}").expect("keywords present");
+        let date_at = body.find("\\TerseDate{1843-01-01}").expect("date present");
+        assert!(date_at < end_block, "date is inside the block");
+        assert!(end_block < abstract_at && abstract_at < keywords_at, "got:\n{body}");
+        assert!(body.contains("\\TerseAuthor{Ada Lovelace}{Analytical Engines}"));
+        assert!(body.contains("\\TerseAuthor{Charles Babbage}{}"));
+        assert!(body.contains("\\TerseSubtitle{A Subtitle}"));
+
+        let cover = resolve_str("title:\n  layout: cover\n");
+        assert_eq!(body, generate_document(&module, &cover), "the body is theme-blind");
     }
 }

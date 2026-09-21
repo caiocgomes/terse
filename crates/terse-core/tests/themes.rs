@@ -30,16 +30,37 @@ fn test_public_theme_has_no_private_dependencies() {
     // fonts and a repo-local logo path: no host-only font family, network
     // resource, or absolute/escaping path is accepted by the schema.
     let magalu = load_theme("magalu", "magalu.theme");
-    assert_eq!(magalu.body_font, "tex-gyre-heros");
+    assert_eq!(magalu.body_font.as_deref(), Some("tex-gyre-heros"));
     let logo = magalu.logo_path.as_deref().expect("declares a logo");
     assert!(!logo.contains("://"));
     assert!(!logo.starts_with('/'));
     assert!(!logo.split('/').any(|seg| seg == ".."));
 
     let academic = load_theme("academic", "academic.theme");
-    assert_eq!(academic.body_font, "libertinus-otf");
+    assert_eq!(academic.body_font.as_deref(), Some("libertinus-otf"));
     assert_eq!(academic.watermark_kind, "none");
     assert_eq!(academic.logo_path, None);
+}
+
+/// `plain-latex-default` scenario "No theme is the plain article", at the
+/// resolution level: a theme file that sets nothing resolves to exactly the
+/// compiler defaults, and its style pulls neither a font nor a page
+/// package. The scaffold `terse init` writes is such a file.
+#[test]
+fn test_empty_theme_equals_defaults() {
+    let source = SourceFile::new(
+        FileId(0),
+        "empty.theme",
+        b"// A theme that sets nothing is the plain article.\n".to_vec(),
+    )
+    .unwrap();
+    let empty = resolve_theme("academic", &source).expect("a comment-only theme resolves");
+    assert_eq!(empty, terse_core::theme::academic());
+
+    let style = terse_core::latex::generate_style(&empty, &[], None);
+    for absent in ["fontspec", "\\setmainfont", "geometry", "libertinus"] {
+        assert!(!style.contains(absent), "the plain default must not load {absent}:\n{style}");
+    }
 }
 
 #[test]
@@ -67,6 +88,7 @@ fn test_theme_invariant_projection() {
     let magalu = load_theme("magalu", "magalu.theme");
     assert_ne!(academic.watermark_kind, magalu.watermark_kind);
     assert_ne!(academic.body_font, magalu.body_font);
+    assert!(academic.body_font.is_some() && magalu.body_font.is_some());
     assert_ne!(academic.citation_style, magalu.citation_style);
 
     let module = terse_core::semantic::ParsedModule {

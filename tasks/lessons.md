@@ -1,5 +1,29 @@
 # Lessons
 
+## 2026-09-21 — Transformar troca de default em redesenho do sistema
+
+**Erro concreto.** Depois de entender que o usuário queria o `article` puro como default, escrevi uma change com 8 requirements modificadas, 22 tarefas, `ContentNeeds` para carregar pacote por conteúdo, `titlesec`, macro `\TersePdfMeta`, rename de `academic` para `default`, mudança do scaffold do `init`, re-derivação do closure de pacotes, e ainda apresentei ao usuário uma discussão sobre linhas por página no A4 versus letter. O pedido era um só: sem tema, sair o LaTeX padrão. Nada disso era necessário para isso.
+
+**Correção literal.** "sim, vc nao entendeu. aquele formato padrao do TeX e muito gostado pelos acadêmicos. eu queria só que ele tb fosse o padrão do terse. é bem mais raro pessoas quererem outro formato, o que mais elas querem é usar melhor a página. e o uso de outros tipos acontece tb, mas é bem mais raro. neste momento se ele funcionar com o padrão, já está bom. depois podemos melhorar pra outros temas."
+
+**Por que errei.** Tratei "tema é delta" como princípio arquitetural a ser tornado rigoroso (cada propriedade puxa exatamente seu pacote) em vez de como descrição do resultado desejado (sem tema, sai o padrão; com tema, muda o que o tema diz). Confundi elegância do modelo com o pedido. Também tensionei um detalhe (altura do bloco de texto) que o usuário nunca levantou e que só existia por causa da minha própria arquitetura.
+
+**Regra abstrata.** Pedido de mudança de default é pedido de mudança de default: a change toca o valor default e o que for estritamente necessário para que o default funcione, e nada mais. Se a proposta cresce para renomear coisas, mudar scaffold, mudar carregamento de pacotes ou mudar closure, parar e perguntar se cada item é necessário para o pedido literal; se não é, vai para "depois". Sinal de alerta: quando a lista de "pressupostos a tensionar" que apresento vem de complexidade que eu mesmo introduzi, e não do pedido do usuário.
+
+**Como aplicar.** Antes de escrever proposal: escrever em uma frase o que o usuário vê diferente depois da change. Cada item do "What Changes" precisa ser rastreável a essa frase. Perguntar "se eu não fizer isso, o pedido literal deixa de funcionar?"; se a resposta for não, cortar. Quando o usuário diz "neste momento X já está bom" ou "depois podemos melhorar", isso é um limite de escopo explícito, não um convite.
+
+## 2026-09-20 — Confundir pedido de default do produto com pedido de receita
+
+**Erro concreto.** Perguntado duas vezes "como eu faço pra gerar com o formato padrão do LaTeX / o padrãozão do TeX", entreguei duas vezes uma *receita*: um arquivo de tema (`padrao.theme`), um recorte de `.sty` para colar à mão e um script (`padrao.sh`) que encadeia os dois. O usuário queria outra coisa: que **o default do compilador, sem tema nenhum, seja o LaTeX padrão** (fonte Computer Modern, `\maketitle`, `\section`, geometria do `article`), e que tema seja um *delta* sobre isso — "se aumento a página, ele mantém tudo padrão e só muda o tamanho da página".
+
+**Correção literal.** "você ainda nao entendeu. eu quero que, se eu nao entre theme, o tema padrão seja o tema do TeX padrão que todo aluno usou. Usando a fonte padrão do TeX, a formatação padrão. É isso. eu quero poder usar outras, mas se não digo nada vai assim. E ai se aumento a página, ele mantem tudo padrão e só muda o tamanho da página."
+
+**Por que errei.** Li "como eu faço" como pergunta de uso ("qual comando dou") quando era pergunta de produto ("qual deveria ser o comportamento sem eu dar comando nenhum"). A repetição da pergunta depois da primeira resposta era o sinal de que a resposta estava no nível errado; em vez de subir de nível, refinei a receita.
+
+**Regra abstrata.** Quando o autor do produto pergunta "como eu faço X" e X é a aparência/comportamento que ele considera o óbvio ("o padrão", "o que todo mundo usa"), a pergunta quase sempre é sobre **o default**, não sobre um caminho para chegar lá. Se a resposta exige que ele rode um passo extra, edite um arquivo gerado ou escreva um tema para obter o comportamento óbvio, o produto está com o default errado, e a resposta certa é uma proposta de mudança de default, não uma receita. E se ele repete a pergunta, a resposta anterior estava no nível errado: subir de nível, não polir.
+
+**Como aplicar.** Antes de responder "como faço X": perguntar-me se X é o que um usuário esperaria sem configurar nada. Se sim, a primeira frase da resposta é "hoje o default é Y; para X ser o default é preciso mudar Z", e só depois, se for útil, a receita provisória — nomeada como provisória.
+
 ## 2026-09-20 — Afirmar limitação técnica em design.md sem ler o código
 
 **Erro concreto.** Ao escrever `openspec/changes/close-verification-gaps/design.md`, registrei como trade-off aceito: "in two-column mode a wide-role figure fills its column rather than spanning the page, because spanning requires the body to emit `figure*`, which the theme cannot influence". Não verifiquei. O corpo já emite `figure*` para o papel `wide` (`crates/terse-core/src/latex/mod.rs:106`: `let env = if is_wide { "figure*" } else { "figure" }`), então figuras largas spanam normalmente e a limitação não existe.

@@ -12,14 +12,20 @@ pub use resolve::ThemeResolveError;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTheme {
     pub name: String,
-    pub page_size: String,
-    pub page_margin_cm: f64,
+    /// `None` leaves the `article` class's own paper (letter) and layout
+    /// untouched; a paper token alone reproduces the class's text block on
+    /// that paper, and a margin replaces the block. Either one is what
+    /// makes the style load `geometry` at all.
+    pub page_size: Option<String>,
+    pub page_margin_cm: Option<f64>,
     pub page_columns: u8,
     /// A TeX-distributed font package that loads its fonts by filename
     /// (e.g. `libertinus-otf`), never a bare font family name: family-name
     /// lookup depends on the host's fontconfig database, which a fresh
-    /// TeX installation may not populate with TeX-tree fonts.
-    pub body_font: String,
+    /// TeX installation may not populate with TeX-tree fonts. `None` is the
+    /// kernel's own family (Latin Modern under XeLaTeX), which needs no
+    /// `fontspec` at all.
+    pub body_font: Option<String>,
     pub body_color: String,
     pub heading_weight: [String; 3],
     pub heading_numbering: [String; 3],
@@ -56,14 +62,18 @@ pub struct ResolvedTheme {
 }
 
 /// The versioned compiler defaults every theme resolves on top of, before
-/// any `.theme` rule is applied.
+/// any `.theme` rule is applied: the unmodified `article` class. Nothing
+/// here pulls a font or page package, headings are the class's sectioning
+/// commands, the title is `\maketitle`, and citations are numeric, which is
+/// what a plain article with a bibliography gives. A theme is a change
+/// over this baseline; a theme that sets nothing is this baseline.
 fn compiler_defaults(name: &str) -> ResolvedTheme {
     ResolvedTheme {
         name: name.to_string(),
-        page_size: "a4".to_string(),
-        page_margin_cm: 2.5,
+        page_size: None,
+        page_margin_cm: None,
         page_columns: 1,
-        body_font: "libertinus-otf".to_string(),
+        body_font: None,
         body_color: "000000".to_string(),
         heading_weight: [
             "bold".to_string(),
@@ -79,13 +89,11 @@ fn compiler_defaults(name: &str) -> ResolvedTheme {
         figure_default_width_pct: 75,
         figure_wide_width_pct: 100,
         figure_placement: "here".to_string(),
-        citation_style: "author-year".to_string(),
+        citation_style: "numeric".to_string(),
         title_layout: "paper".to_string(),
-        // Left, because that is what every document rendered before the
-        // `title` component existed: making a setting real must not
-        // silently restyle documents that never asked for a change. A theme
-        // opts into centering.
-        title_align: "left".to_string(),
+        // Center, because that is what `\maketitle` does; `left` opts into
+        // the custom title block instead.
+        title_align: "center".to_string(),
         theorem_style: [
             "plain".to_string(),
             "plain".to_string(),
@@ -107,9 +115,8 @@ fn compiler_defaults(name: &str) -> ResolvedTheme {
     }
 }
 
-/// The initial academic theme's immutable resolved defaults, used to
-/// generate the milestone-1 scaffold's `terse-style.sty` when no `.theme`
-/// file overrides them yet.
+/// The compiler defaults under the default theme name: the plain `article`,
+/// which is what an empty `academic.theme` (the scaffold's) resolves to.
 pub fn academic() -> ResolvedTheme {
     compiler_defaults("academic")
 }

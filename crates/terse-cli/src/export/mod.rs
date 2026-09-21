@@ -146,7 +146,10 @@ pub fn validate_target(
         .collect();
     let needs_biber = !cited.is_empty();
 
-    let font_package = terse_core::latex::font_package_for(&theme.body_font).to_string();
+    let font_package = theme
+        .body_font
+        .as_deref()
+        .map(terse_core::latex::font_package_for);
     let babel_language = if needs_biber {
         Some(plan.module.metadata.as_ref().map(|m| m.language.clone()).unwrap_or_else(|| "en".to_string()))
     } else {
@@ -155,7 +158,7 @@ pub fn validate_target(
     let violations = profile::check_requirements(
         &profile,
         &extra_packages,
-        &font_package,
+        font_package,
         babel_language.as_deref(),
     );
     if !violations.is_empty() {

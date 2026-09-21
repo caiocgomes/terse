@@ -47,7 +47,7 @@ Only referenced document/theme assets and explicitly declared support files SHAL
 - **THEN** the build copies the referenced figure and does not copy the unrelated file
 
 ### Requirement: Documented Unicode and bibliography toolchain
-The initial backend SHALL target XeLaTeX with the bounded supported package set and BibLaTeX/Biber for bibliography processing. Fonts SHALL use supported distribution filenames and supported language mappings. `.bib` and source text SHALL support Unicode metadata/input; known missing glyphs during compilation MUST fail with actionable diagnostics. Without engine execution, the command SHALL identify that rendering/glyph coverage was not validated. Additional engines MUST NOT be silently substituted.
+The initial backend SHALL target XeLaTeX with the bounded supported package set and BibLaTeX/Biber for bibliography processing. With no font token the kernel's Latin Modern SHALL carry the text of supported languages without `fontspec`; font tokens SHALL use supported distribution filenames and supported language mappings. `.bib` and source text SHALL support Unicode metadata/input; known missing glyphs during compilation MUST fail with actionable diagnostics. Without engine execution, the command SHALL identify that rendering/glyph coverage was not validated. Additional engines MUST NOT be silently substituted.
 
 #### Scenario: Unicode paper compiles
 - **GIVEN** a supported-language paper and bibliography containing accented author names and prose supported by the configured fonts

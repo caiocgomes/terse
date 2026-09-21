@@ -50,6 +50,18 @@ pub fn extract_text(pdf: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// The `pdffonts` table: one line per embedded font, name first. Used to
+/// prove which family a build actually embedded, which neither the style
+/// text nor the text layer can show.
+pub fn fonts(pdf: &Path) -> String {
+    let output = Command::new("pdffonts")
+        .arg(pdf)
+        .output()
+        .expect("pdffonts must run");
+    assert!(output.status.success(), "pdffonts failed on {pdf:?}");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
 /// Page count, via pdfinfo.
 pub fn page_count(pdf: &Path) -> usize {
     let output = Command::new("pdfinfo")

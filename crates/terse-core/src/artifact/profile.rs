@@ -58,7 +58,7 @@ pub enum ProfileViolation {
 pub fn check_requirements(
     profile: &ExportProfile,
     required_packages: &[&str],
-    font_token: &str,
+    font_package: Option<&str>,
     babel_language: Option<&str>,
 ) -> Vec<ProfileViolation> {
     let mut violations = Vec::new();
@@ -67,8 +67,12 @@ pub fn check_requirements(
             violations.push(ProfileViolation::UnsupportedPackage(pkg.to_string()));
         }
     }
-    if !profile.fonts.iter().any(|f| f == font_token) {
-        violations.push(ProfileViolation::UnsupportedFont(font_token.to_string()));
+    // No font package means the kernel's own family, which every profile
+    // provides by definition; only a theme-selected package needs vouching.
+    if let Some(font_package) = font_package {
+        if !profile.fonts.iter().any(|f| f == font_package) {
+            violations.push(ProfileViolation::UnsupportedFont(font_package.to_string()));
+        }
     }
     if let Some(lang) = babel_language {
         if !profile.babel_languages.iter().any(|l| l == lang) {
@@ -124,7 +128,7 @@ mod tests {
     #[test]
     fn test_requirements_report_every_violation() {
         let profile = resolve_profile("texlive-2025-xelatex").unwrap();
-        let violations = check_requirements(&profile, &["hyperref", "made-up-pkg"], "made-up-font", Some("klingon"));
+        let violations = check_requirements(&profile, &["hyperref", "made-up-pkg"], Some("made-up-font"), Some("klingon"));
         assert_eq!(
             violations,
             vec![
@@ -138,7 +142,9 @@ mod tests {
     #[test]
     fn test_requirements_pass_for_supported_set() {
         let profile = resolve_profile("texlive-2025-xelatex").unwrap();
-        let violations = check_requirements(&profile, &["hyperref", "graphicx"], "tgheros", Some("en"));
+        let violations = check_requirements(&profile, &["hyperref", "graphicx"], Some("tgheros"), Some("en"));
         assert!(violations.is_empty());
+        let no_font = check_requirements(&profile, &["hyperref"], None, Some("en"));
+        assert!(no_font.is_empty(), "the kernel family needs no profile entry");
     }
 }

@@ -200,10 +200,11 @@ fn apply_property(
             if prop.value != "a4" && prop.value != "letter" {
                 return Err(invalid("'a4' or 'letter'"));
             }
-            theme.page_size = prop.value.clone();
+            theme.page_size = Some(prop.value.clone());
         }
         ("page", None, "margin") => {
-            theme.page_margin_cm = parse_dimension_cm(&prop.value).ok_or_else(|| invalid("a dimension like '2.5cm'"))?;
+            theme.page_margin_cm =
+                Some(parse_dimension_cm(&prop.value).ok_or_else(|| invalid("a dimension like '2.5cm'"))?);
         }
         ("page", None, "columns") => {
             theme.page_columns = match prop.value.as_str() {
@@ -213,7 +214,7 @@ fn apply_property(
             };
         }
         ("body", None, "font") => {
-            theme.body_font = parse_font_token(&prop.value).ok_or_else(|| invalid("a supported font token"))?;
+            theme.body_font = Some(parse_font_token(&prop.value).ok_or_else(|| invalid("a supported font token"))?);
         }
         ("body", None, "color") => {
             theme.body_color = parse_color(&prop.value).ok_or_else(|| invalid("a hex color or 'black'"))?;
@@ -446,7 +447,7 @@ fn validate_bounds(theme: &ResolvedTheme, spans: &PropertySpans, errors: &mut Ve
             .copied()
             .unwrap_or(zero_span)
     };
-    if theme.page_margin_cm <= 0.0 || theme.page_margin_cm * 2.0 >= 21.0 {
+    if theme.page_margin_cm.is_some_and(|m| m <= 0.0 || m * 2.0 >= 21.0) {
         errors.push(ThemeResolveError::OutOfBounds {
             span: at("page", None, "margin"),
             component: "page".to_string(),

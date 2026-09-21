@@ -4,9 +4,26 @@ use crate::theme::parse::ThemeParseError;
 use crate::source::{FileId, SourceFile, SourceSpan};
 use crate::syntax::inlines::Inline;
 
+/// `plain-latex-default` scenario "No theme is the plain article": the
+/// compiler default is the unmodified `article`, so nothing that would pull
+/// a font or page package is set, citations render the way a plain article
+/// with a bibliography does (numeric), and the title is centered because
+/// that is what `\maketitle` does.
 #[test]
-fn test_academic_defaults_are_stable() {
-    assert_eq!(academic(), academic());
+fn test_academic_defaults_are_the_plain_article() {
+    let defaults = academic();
+    assert_eq!(defaults, academic(), "defaults are stable");
+    assert_eq!(defaults.body_font, None, "no font token: the kernel family");
+    assert_eq!(defaults.page_size, None, "no paper token: the class layout");
+    assert_eq!(defaults.page_margin_cm, None, "no margin token: the class layout");
+    assert_eq!(defaults.citation_style, "numeric");
+    assert_eq!(defaults.title_align, "center");
+    assert_eq!(defaults.title_layout, "paper");
+    assert_eq!(defaults.heading_weight, ["bold", "bold", "bold"].map(String::from));
+    assert_eq!(
+        defaults.heading_numbering,
+        ["decimal", "decimal", "decimal"].map(String::from)
+    );
 }
 
 fn resolve_str(name: &str, text: &str) -> Result<ResolvedTheme, ThemeError> {
@@ -194,7 +211,12 @@ fn test_theme_cannot_inject_raw_tex() {
             "generated style must not contain {forbidden:?}"
         );
     }
-    assert!(style.contains("\\bfseries"), "`bold` maps to the real command");
+    // `bold` is the class's own heading weight, so it emits no
+    // redefinition at all; a non-default token maps to the real command.
+    let italic = resolve_str("academic", "heading.1:\n  weight: italic\n").unwrap();
+    let italic_style = crate::latex::generate_style(&italic, &[], None);
+    assert!(italic_style.contains("\\itshape"), "`italic` maps to the real command");
+    assert!(!italic_style.contains("\\italic"), "the token itself never becomes a control sequence");
 }
 
 /// `close-verification-gaps` scenario "Theorem kind inherits its base".
@@ -507,11 +529,11 @@ fn test_every_accepted_property_reaches_the_style() {
         ("body", None, "font", "tex-gyre-heros", "\\setmainfont{texgyreheros-regular.otf}"),
         ("body", None, "color", "#112233", "112233"),
         ("heading.1", None, "weight", "regular", "\\mdseries"),
-        ("heading.1", None, "numbering", "roman", "\\Roman{terseheadingone}"),
+        ("heading.1", None, "numbering", "roman", "\\Roman{section}"),
         ("heading.2", None, "weight", "italic", "\\itshape"),
-        ("heading.2", None, "numbering", "none", "TerseHeadingTwo"),
+        ("heading.2", None, "numbering", "none", "\\subsection*{#1}"),
         ("heading.3", None, "weight", "small-caps", "\\scshape"),
-        ("heading.3", None, "numbering", "decimal", "\\arabic{terseheadingthree}"),
+        ("heading.3", None, "numbering", "decimal", "\\subsubsection{#1}"),
         ("figure", None, "align", "left", "\\TerseFigureAlign"),
         ("figure", None, "default-width", "60%", "0.600\\linewidth"),
         ("figure", Some("wide"), "default-width", "95%", "0.950\\linewidth"),
