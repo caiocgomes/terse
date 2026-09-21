@@ -219,6 +219,9 @@ fn apply_property(
             theme.body_color = parse_color(&prop.value).ok_or_else(|| invalid("a hex color or 'black'"))?;
         }
         ("heading.1" | "heading.2" | "heading.3", None, "weight") => {
+            if !["bold", "regular", "italic", "small-caps"].contains(&prop.value.as_str()) {
+                return Err(invalid("'bold', 'regular', 'italic', or 'small-caps'"));
+            }
             let idx = heading_index(component);
             theme.heading_weight[idx] = prop.value.clone();
         }
@@ -287,10 +290,7 @@ fn apply_property(
             }
         }
         ("table", None, "padding") => {
-            theme.table_padding = prop
-                .value
-                .parse::<f64>()
-                .ok()
+            theme.table_padding = parse_finite(&prop.value)
                 .ok_or_else(|| invalid("a row-height multiplier like '1.2'"))?;
         }
         ("table", None, "rules") => {
@@ -323,11 +323,11 @@ fn apply_property(
         }
         ("watermark", None, "opacity") => {
             theme.watermark_opacity =
-                prop.value.parse::<f64>().ok().ok_or_else(|| invalid("a number between 0 and 1"))?;
+                parse_finite(&prop.value).ok_or_else(|| invalid("a number between 0 and 1"))?;
         }
         ("watermark", None, "angle") => {
             theme.watermark_angle =
-                prop.value.parse::<f64>().ok().ok_or_else(|| invalid("an angle in degrees"))?;
+                parse_finite(&prop.value).ok_or_else(|| invalid("an angle in degrees"))?;
         }
         ("logo", None, "source") => {
             if is_external_resource(&prop.value) {
@@ -335,6 +335,13 @@ fn apply_property(
                     span: prop.span,
                     property: prop.name.clone(),
                 });
+            }
+            // The path is the only theme string emitted verbatim, as a
+            // macro argument: a `}` closes that argument early and
+            // everything after it executes. Its charset is part of its
+            // type, not a matter of taste.
+            if !is_tex_safe_path(&prop.value) {
+                return Err(invalid("a relative path without TeX-special characters"));
             }
             theme.logo_path = Some(prop.value.clone());
         }
@@ -366,14 +373,33 @@ fn parse_percentage(v: &str) -> Option<u8> {
     n.parse::<u8>().ok()
 }
 
+/// `f64::from_str` accepts `NaN` and `inf`, and every bounds check here is
+/// two-sided (`x <= lo || x > hi`), which is false on both sides for NaN.
+/// A non-finite value would therefore pass validation and be formatted
+/// into the style as a word — `margin=NaNcm`. Finiteness is part of what
+/// makes these values numbers.
+fn parse_finite(v: &str) -> Option<f64> {
+    let n = v.parse::<f64>().ok()?;
+    n.is_finite().then_some(n)
+}
+
 fn parse_dimension_cm(v: &str) -> Option<f64> {
-    let n = v.strip_suffix("cm")?;
-    n.parse::<f64>().ok()
+    parse_finite(v.strip_suffix("cm")?)
 }
 
 fn parse_dimension_em(v: &str) -> Option<f64> {
-    let n = v.strip_suffix("em")?;
-    n.parse::<f64>().ok()
+    parse_finite(v.strip_suffix("em")?)
+}
+
+/// A logo path reaches LaTeX as a macro argument. Everything TeX treats as
+/// syntax (group and escape characters, comment, math shift, alignment,
+/// parameter, superscript, subscript, tilde) is rejected, as are control
+/// characters, so the argument cannot be closed or the preamble reopened.
+fn is_tex_safe_path(v: &str) -> bool {
+    !v.is_empty()
+        && !v
+            .chars()
+            .any(|c| c.is_control() || "{}\\%$&#^_~".contains(c))
 }
 
 /// Selects a TeX-distributed font by filename token; no host-family

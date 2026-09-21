@@ -121,12 +121,80 @@ fn test_typed_theme_values_rejected() {
         "table:\n  header: italic\n",
         "bibliography:\n  size: enormous\n",
         "bibliography:\n  item-spacing: wide\n",
+        // Heading weight had no row here, and that absence is exactly why
+        // it shipped as the one unvalidated property in the schema.
+        "heading.1:\n  weight: bfseries\n",
+        "heading.2:\n  weight: heavy\n",
+        "heading.3:\n  weight: 700\n",
+        // A logo path is emitted into a macro argument, so its charset is
+        // part of its type, not just its shape.
+        "logo:\n  source: assets/logo}.png\n",
+        // Non-finite numbers pass a two-sided bounds check (`x <= 0.0 ||
+        // x > N` is false-false for NaN) and reach LaTeX as a word.
+        "page:\n  margin: NaNcm\n",
+        "table:\n  padding: NaN\n",
+        "watermark:\n  opacity: inf\n",
     ] {
         assert!(
             resolve_str("academic", bad).is_err(),
             "expected rejection for: {bad}"
         );
     }
+}
+
+/// A theme is declarative data, never code: the "Independent declarative
+/// theme files" requirement says arbitrary expressions, raw TeX and
+/// executable hooks MUST fail validation. Two properties used to reach a
+/// TeX-executable position carrying the theme's own string — `heading.N
+/// weight` was interpolated straight after a backslash, and `logo source`
+/// into a macro argument a `}` can close early. Both are rejected at the
+/// offending property, and a valid theme's generated style contains no
+/// trace of an injection attempt.
+#[test]
+fn test_theme_cannot_inject_raw_tex() {
+    for (text, component, property) in [
+        (
+            "heading.1:\n  weight: bfseries\\LaTeX\\ INJECTED\n",
+            "heading.1",
+            "weight",
+        ),
+        (
+            "logo:\n  source: logo.png}\\input{/etc/passwd\n",
+            "logo",
+            "source",
+        ),
+    ] {
+        let error = sole_resolve_error(text);
+        let (span, got_component, got_property) = match &error {
+            ThemeResolveError::InvalidValue { span, component, property, .. } => {
+                (*span, component.clone(), property.clone())
+            }
+            other => panic!("expected an InvalidValue rejection, got {other:?}"),
+        };
+        assert_eq!((got_component.as_str(), got_property.as_str()), (component, property));
+        assert!(
+            span_text(text, span).contains(property),
+            "the diagnostic must point at the offending property, got {:?}",
+            span_text(text, span)
+        );
+    }
+
+    // Nothing an injection attempt carries survives into a valid theme's
+    // style: the accepted tokens are mapped to fixed commands, never
+    // interpolated.
+    let theme = resolve_str(
+        "academic",
+        "heading.1:\n  weight: bold\n\nlogo:\n  source: assets/logo.png\n",
+    )
+    .expect("the semantic tokens resolve");
+    let style = crate::latex::generate_style(&theme, &[], None);
+    for forbidden in ["INJECTED", "\\input", "/etc/passwd", "\\bold"] {
+        assert!(
+            !style.contains(forbidden),
+            "generated style must not contain {forbidden:?}"
+        );
+    }
+    assert!(style.contains("\\bfseries"), "`bold` maps to the real command");
 }
 
 /// `close-verification-gaps` scenario "Theorem kind inherits its base".
@@ -438,11 +506,11 @@ fn test_every_accepted_property_reaches_the_style() {
         ("page", None, "columns", "2", "\\twocolumn"),
         ("body", None, "font", "tex-gyre-heros", "\\setmainfont{texgyreheros-regular.otf}"),
         ("body", None, "color", "#112233", "112233"),
-        ("heading.1", None, "weight", "mdseries", "\\mdseries"),
+        ("heading.1", None, "weight", "regular", "\\mdseries"),
         ("heading.1", None, "numbering", "roman", "\\Roman{terseheadingone}"),
-        ("heading.2", None, "weight", "itshape", "\\itshape"),
+        ("heading.2", None, "weight", "italic", "\\itshape"),
         ("heading.2", None, "numbering", "none", "TerseHeadingTwo"),
-        ("heading.3", None, "weight", "scshape", "\\scshape"),
+        ("heading.3", None, "weight", "small-caps", "\\scshape"),
         ("heading.3", None, "numbering", "decimal", "\\arabic{terseheadingthree}"),
         ("figure", None, "align", "left", "\\TerseFigureAlign"),
         ("figure", None, "default-width", "60%", "0.600\\linewidth"),

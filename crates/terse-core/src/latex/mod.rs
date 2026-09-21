@@ -517,12 +517,48 @@ pub fn font_files_for(token: &str) -> [&'static str; 4] {
 /// alongside [`font_files_for`]'s `\setmainfont`, because these packages
 /// also carry NFSS and math setup (`libertinus-otf` pulls `unicode-math`)
 /// that dropping them would silently change.
-pub fn font_package_for(token: &str) -> &str {
+pub fn font_package_for(token: &str) -> &'static str {
     match token {
         "tex-gyre-heros" => "tgheros",
         "tex-gyre-pagella" => "tgpagella",
         "latin-modern" => "lmodern",
-        other => other,
+        // `libertinus-otf` and any future token default to the compiler
+        // default family, as [`font_files_for`] already does. No arm
+        // returns its input: a theme string must never become a package
+        // name, so this mapping is safe on its own rather than relying on
+        // a validation check in another module.
+        _ => "libertinus-otf",
+    }
+}
+
+/// Maps a theme's heading-weight token to the LaTeX font-switch command
+/// that applies it.
+///
+/// The token is deliberately semantic (`bold`, not `bfseries`): this value
+/// is emitted immediately after a backslash inside a macro body, so
+/// storing a command name would make the theme file the author of a
+/// control sequence. It did, until `weight: bfseries\LaTeX{}` was shown to
+/// land verbatim in the generated style. Every arm returns a literal, and
+/// the default keeps a theme resolved by an older schema rendering as it
+/// always has.
+fn heading_weight_command(token: &str) -> &'static str {
+    match token {
+        "regular" => "\\mdseries",
+        "italic" => "\\itshape",
+        "small-caps" => "\\scshape",
+        _ => "\\bfseries",
+    }
+}
+
+/// Maps a theme's theorem-style token to the `amsthm` style it selects.
+/// Same reasoning as [`heading_weight_command`]: the token reaches a macro
+/// argument, so the mapping belongs here rather than depending on a closed
+/// list enforced during resolution.
+fn theorem_style_command(token: &str) -> &'static str {
+    match token {
+        "definition" => "definition",
+        "remark" => "remark",
+        _ => "plain",
     }
 }
 
@@ -655,10 +691,10 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
             _ => String::new(),
         };
         headings.push_str(&format!(
-            "\\newcommand{{\\{macro_name}}}[1]{{\\refstepcounter{{{counter}}}\\par\\vspace{{1em}}{{{size}\\{weight}\\selectfont {number_prefix}#1}}\\par}}\n",
+            "\\newcommand{{\\{macro_name}}}[1]{{\\refstepcounter{{{counter}}}\\par\\vspace{{1em}}{{{size}{weight}\\selectfont {number_prefix}#1}}\\par}}\n",
             macro_name = heading_macros[i],
             size = heading_sizes[i],
-            weight = theme.heading_weight[i],
+            weight = heading_weight_command(&theme.heading_weight[i]),
         ));
     }
     let figure_widths = format!(
@@ -691,7 +727,10 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
         .iter()
         .zip(theme.theorem_style.iter())
         .map(|((env, label), style)| {
-            format!("\\theoremstyle{{{style}}}\n\\newtheorem{{{env}}}{{{label}}}\n")
+            format!(
+                "\\theoremstyle{{{style}}}\n\\newtheorem{{{env}}}{{{label}}}\n",
+                style = theorem_style_command(style)
+            )
         })
         .collect();
     let table_setup = format!(

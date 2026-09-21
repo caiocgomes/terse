@@ -66,9 +66,9 @@ fn compiler_defaults(name: &str) -> ResolvedTheme {
         body_font: "libertinus-otf".to_string(),
         body_color: "000000".to_string(),
         heading_weight: [
-            "bfseries".to_string(),
-            "bfseries".to_string(),
-            "bfseries".to_string(),
+            "bold".to_string(),
+            "bold".to_string(),
+            "bold".to_string(),
         ],
         heading_numbering: [
             "decimal".to_string(),
