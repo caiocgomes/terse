@@ -6,3 +6,4 @@
 managed-prefix*.tar.gz
 /dist
 .gitnexus
+.DS_Store
