@@ -41,4 +41,4 @@ Authors already write in Markdown. Today Terse only accepts `.trs` sources (`cra
 
 ## Open for design
 
-- **`$$` in the middle of a paragraph.** Pandoc accepts `$$x$$` inside running text. `.trs` rejects it (`dollar-math-delimiters`), because a `$$` must start its own line. Recommendation: same rule for `.md`, so one document behaves identically in both formats. If the Markdown parser library brings its own `$` handling, the design must decide whether to use it or apply the `.trs` rule, which today matches Pandoc 3.11 byte for byte.
+- **Markdown parser library and `$`.** Decided: `$$` in the middle of a paragraph is rejected in `.md` as in `.trs` (author, 2026-09-23). If the chosen library (`pulldown-cmark` or `comrak`) brings its own `$` handling, the design decides whether to use it or apply the `.trs` rule, which today matches Pandoc 3.11 byte for byte.

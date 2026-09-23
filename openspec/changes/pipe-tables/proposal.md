@@ -51,10 +51,10 @@ None.
 - `docs/language.md`: pipe tables, alignment, inline cells, and optional caption.
 - `compile-markdown` depends on this change: it maps GFM tables onto the same node.
 
-## Open for design
+## Decisions (settled with the author, 2026-09-23)
 
-- **Caption and id on a pipe table in `.trs`.** Recommendation: the existing `table [id: ...]:` header takes an optional `caption:` field and a pipe-table body. A bare pipe block is a captionless table.
-- **Rows with the wrong number of cells.** GFM pads short rows and drops extra cells. Terse rejects mismatched rows today. Keeping the rejection is explicit, but real Markdown tables sometimes rely on padding.
-- **`|` inside math or code in a cell.** GFM splits on every unescaped `|`, even inside code spans and `$...$`, so a cell with `$|x|$` (absolute value) breaks into three cells unless written `$\|x\|$`. The choice is between following GFM or protecting `$...$` and code spans.
-- **`fmt`.** Whether it keeps pipe-table bytes as written or pads columns to align them.
-- **Equation numbering contradiction.** `latex-generation/spec.md:62` says "display equations without IDs SHALL be unnumbered", but the generator numbers every `math:` block, with or without an id (`latex/mod.rs:93`). `language-parsing/spec.md:93`, added by `dollar-math-delimiters`, turned that code behavior into a requirement ("`math:` equations SHALL be numbered"). The two main specs now contradict each other. Either id-less `math:` becomes unnumbered (then it matches `$$`), or `latex-generation` is corrected to say `math:` is always numbered and `$$` never is. This is the author's decision.
+- **Caption and id on a pipe table in `.trs`.** The existing `table [id: ...]:` header takes an optional `caption:` field and a pipe-table body. A bare pipe block is a captionless table.
+- **Rows with the wrong number of cells.** A short row is padded with empty cells, as in GFM. A row with more cells than the header is a diagnostic, because dropping a cell would lose content silently.
+- **`|` inside math or code.** A `|` inside `$...$`, `\(...\)`, or a code span does not split cells, so `$|x|$` works. Outside those spans, `\|` is a literal pipe. Inside a code span, `\|` also reads as `|` for GFM compatibility. Inside math it is left alone, where `\|` is TeX's double bar.
+- **`fmt`.** Pipe-table lines are kept as written; columns are not re-padded.
+- **Equation numbering.** Option (b): `math:` equations are always numbered, with an anchor when identified, and `$$` equations never are. Rewriting "Numbered and unnumbered references remain valid" corrects its sentence "display equations without IDs SHALL be unnumbered" to match `language-parsing` and the generator. No PDF changes.
