@@ -308,3 +308,57 @@ fn test_dollar_display_does_not_consume_equation_number() {
         "the $$ display must not be numbered:\n{text}"
     );
 }
+
+#[test]
+#[ignore = "requires a local XeLaTeX distribution"]
+fn test_code_block_is_inert_in_pdf() {
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir("code-block-inert");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    // A file the code's `\input` must never actually read.
+    fs::write(tmp.join("secret.txt"), "SECRET-MARKER\n").unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        concat!(
+            "document:\n  title: \"Inert Code\"\n\n",
+            "```python\n",
+            "# café = \"ação\"\n",
+            "x = \"\\input{secret.txt}\"\n",
+            "y = \"\\write18{touch PWNED}\"\n",
+            "z = \"^^5cinput\"\n",
+            "```\n",
+        ),
+    )
+    .unwrap();
+
+    let code = terse_cli::run(
+        ["terse", "build", "--require-pdf", "--theme", "academic"],
+        &tmp,
+    );
+    assert_eq!(code, 0);
+    let text = crate::common::pdf::extract_text(&tmp.join("build/academic/paper.pdf"));
+    assert!(text.contains("café"), "{text}");
+    assert!(text.contains("ação"), "{text}");
+    assert!(text.contains("\\input{secret.txt}"), "{text}");
+    assert!(text.contains("\\write18{touch PWNED}"), "{text}");
+    assert!(text.contains("^^5cinput"), "{text}");
+    assert!(
+        !text.contains("SECRET-MARKER"),
+        "the code block must not actually read secret.txt:\n{text}"
+    );
+    assert!(
+        !tmp.join("PWNED").exists(),
+        "the code block must not create files"
+    );
+    assert!(
+        !tmp.join("build/academic/PWNED").exists(),
+        "the code block must not create files"
+    );
+}

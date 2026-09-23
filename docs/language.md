@@ -48,6 +48,28 @@ diagnostic error — metadata placement is checked, not inferred.
   subset. Raw blocks always emit `W-TEX-001`; `check --deny-warnings`
   turns that into a build failure. Declared support files/packages (e.g.
   `tikz`) are validated and copied deterministically.
+- Fenced code blocks: a line of three or more backticks, an optional
+  language tag (```` ```python ````), the code, and a closing fence of at
+  least the same length. Content is opaque, kept byte for byte, and never
+  parsed as Terse: `$`, `*`, `[@alias]`, `\input`, and every other
+  metacharacter print literally. A known tag maps to a `listings`
+  language for highlighting (`python`/`py`, `r`, `sql`, `bash`/`sh`, `c`,
+  `cpp`/`c++`, `java`, `matlab`, `octave`, `html`, `xml`, `go`, `haskell`,
+  `ruby`, `perl`, `php`, `scala`, `swift`, `lua`, `fortran`,
+  `tex`/`latex`, `make`/`makefile`); an unrecognized or absent tag still
+  renders, just without highlighting — never an error. A content line
+  containing `\end{TerseCode}` (spaces inside the braces tolerated) is
+  rejected, since that sequence would close the rendering environment
+  early and run the rest of the block as live LaTeX. Code blocks are
+  accepted at module scope, in theorem/proof bodies, and inside list
+  items — the one non-paragraph, non-list construct a list item accepts.
+  No shell escape is required or used; the code is never executed.
+
+Inside any opaque payload (`math:`/`tex:` bodies, `$$` displays, and code
+blocks), only the block's own required structural prefix must be plain
+spaces; everything past it — tabs, odd indentation, a Python continuation
+aligned under a parenthesis, a Makefile recipe line — is kept as literal
+content, never checked against the two-space structural rule.
 
 ## Multi-file projects
 

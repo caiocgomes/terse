@@ -727,6 +727,325 @@ fn test_tex_math_bytes_are_preserved() {
 }
 
 #[test]
+fn test_opaque_payload_lines_are_not_structural() {
+    // `math:` payload lines may use indentation that would be invalid
+    // structurally (five spaces on the second line, not a multiple of two
+    // relative to the required two-space body prefix).
+    let math_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "math:\n",
+        "  a = b\n",
+        "     + c\n",
+        "\n",
+        "After math.\n",
+    );
+    let module = parse_text(math_src.as_bytes());
+    assert_eq!(module.blocks.len(), 2, "{:?}", module.blocks);
+    match &module.blocks[0].kind {
+        NodeKind::Equation { payload, .. } => assert_eq!(payload, "a = b\n   + c"),
+        other => panic!("expected equation, got {other:?}"),
+    }
+    match &module.blocks[1].kind {
+        NodeKind::Paragraph { .. } => {}
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+
+    // `tex:` payload tolerates a tab right after its own structural prefix.
+    let tex_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "tex:\n",
+        "  \t\\draw;\n",
+        "\n",
+        "After tex.\n",
+    );
+    let module = parse_text(tex_src.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::RawTex { payload } => assert_eq!(payload, "\t\\draw;"),
+        other => panic!("expected raw tex, got {other:?}"),
+    }
+
+    // A multi-line `$$` payload tolerates a three-space middle line.
+    let dollar_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "$$\n",
+        "x =\n",
+        "   y\n",
+        "$$\n",
+        "\n",
+        "After dollar.\n",
+    );
+    let module = parse_text(dollar_src.as_bytes());
+    assert_eq!(module.blocks.len(), 2, "{:?}", module.blocks);
+    match &module.blocks[0].kind {
+        NodeKind::Equation {
+            payload, numbered, ..
+        } => {
+            assert!(!numbered);
+            assert_eq!(payload, "x =\n   y");
+        }
+        other => panic!("expected equation, got {other:?}"),
+    }
+    match &module.blocks[1].kind {
+        NodeKind::Paragraph { .. } => {}
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+
+    // A fenced code block tolerates a tab-indented content line.
+    let fence_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```\n",
+        "\tindented\n",
+        "```\n",
+        "\n",
+        "After code.\n",
+    );
+    let module = parse_text(fence_src.as_bytes());
+    assert_eq!(module.blocks.len(), 2, "{:?}", module.blocks);
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { code, language } => {
+            assert_eq!(language, &None);
+            assert_eq!(code, "\tindented");
+        }
+        other => panic!("expected code block, got {other:?}"),
+    }
+    match &module.blocks[1].kind {
+        NodeKind::Paragraph { .. } => {}
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+
+    // Edge case: a paragraph line indented by three spaces (not inside any
+    // opaque block) still fails structurally.
+    let bad_indent = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "Intro.\n",
+        "   Bad indent line.\n",
+    );
+    assert!(try_parse_text(bad_indent.as_bytes()).is_err());
+
+    // Edge case: a malformed `math:`-shaped header followed by a
+    // three-space line still fails -- it never opened a payload region.
+    let malformed_header = concat!("document:\n  title: \"T\"\n\n", "math: nope\n", "   x\n",);
+    assert!(try_parse_text(malformed_header.as_bytes()).is_err());
+}
+
+#[test]
+fn test_fenced_code_block_is_byte_exact() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```python\n",
+        "\tif x:\n",
+        "   aligned = (1,\n",
+        "// not a comment\n",
+        "$x$ and *y* and [@ref]\n",
+        "\n",
+        "end\n",
+        "```\n",
+    );
+    let module = parse_text(src.as_bytes());
+    assert_eq!(module.blocks.len(), 1, "{:?}", module.blocks);
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { language, code } => {
+            assert_eq!(language.as_deref(), Some("python"));
+            assert_eq!(
+                code,
+                "\tif x:\n   aligned = (1,\n// not a comment\n$x$ and *y* and [@ref]\n\nend"
+            );
+        }
+        other => panic!("expected code block, got {other:?}"),
+    }
+
+    // A CRLF-encoded source keeps CRLF inside the code.
+    let crlf = "document:\r\n  title: \"T\"\r\n\r\n```\r\nline one\r\nline two\r\n```\r\n";
+    let module = parse_text(crlf.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { code, .. } => assert_eq!(code, "line one\r\nline two"),
+        other => panic!("expected code block, got {other:?}"),
+    }
+
+    // A whitespace-only content line keeps its exact spaces.
+    let ws_line = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```\n",
+        "a\n",
+        "   \n",
+        "b\n",
+        "```\n",
+    );
+    let module = parse_text(ws_line.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { code, .. } => assert_eq!(code, "a\n   \nb"),
+        other => panic!("expected code block, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_fence_ends_running_paragraph() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "Run this:\n",
+        "```bash\n",
+        "make all\n",
+        "```\n",
+        "Then continue.\n",
+    );
+    let module = parse_text(src.as_bytes());
+    assert_eq!(module.blocks.len(), 3, "{:?}", module.blocks);
+    assert_eq!(node_text(&module.blocks[0]), "Run this:");
+    match &module.blocks[1].kind {
+        NodeKind::CodeBlock { language, code } => {
+            assert_eq!(language.as_deref(), Some("bash"));
+            assert_eq!(code, "make all");
+        }
+        other => panic!("expected code block, got {other:?}"),
+    }
+    assert_eq!(node_text(&module.blocks[2]), "Then continue.");
+}
+
+#[test]
+fn test_code_block_in_list_item() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "1. Install:\n",
+        "  ```bash\n",
+        "  pip install terse\n",
+        "  ```\n",
+    );
+    let module = parse_text(src.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::List { items, .. } => {
+            assert_eq!(items.len(), 1);
+            let item = &items[0];
+            assert_eq!(plain_text(&item.inlines), "Install:");
+            assert_eq!(item.continuation.len(), 1);
+            match &item.continuation[0].kind {
+                NodeKind::CodeBlock { language, code } => {
+                    assert_eq!(language.as_deref(), Some("bash"));
+                    assert_eq!(code, "pip install terse");
+                }
+                other => panic!("expected code block, got {other:?}"),
+            }
+        }
+        other => panic!("expected list, got {other:?}"),
+    }
+
+    // The same position holding `math:` still fails with the existing
+    // list-item diagnostic.
+    let math_in_item = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "1. Install:\n",
+        "  math:\n",
+        "    x = 1\n",
+    );
+    assert!(try_parse_text(math_in_item.as_bytes()).is_err());
+
+    // A fence inside a theorem body is accepted and nested under the
+    // theorem.
+    let in_theorem = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "theorem:\n",
+        "  Claim.\n",
+        "  ```\n",
+        "  x = y\n",
+        "  ```\n",
+    );
+    let module = parse_text(in_theorem.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::TheoremLike { body, .. } => {
+            assert_eq!(body.len(), 2);
+            match &body[1].kind {
+                NodeKind::CodeBlock { code, .. } => assert_eq!(code, "x = y"),
+                other => panic!("expected code block, got {other:?}"),
+            }
+        }
+        other => panic!("expected theorem, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_long_fences_and_untagged_blocks() {
+    let four_backtick = concat!("document:\n  title: \"T\"\n\n", "````\n", "```\n", "````\n",);
+    let module = parse_text(four_backtick.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { language, code } => {
+            assert_eq!(language, &None);
+            assert_eq!(code, "```");
+        }
+        other => panic!("expected code block, got {other:?}"),
+    }
+
+    let untagged = concat!("document:\n  title: \"T\"\n\n", "```\n", "x = 1\n", "```\n",);
+    let module = parse_text(untagged.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { language, .. } => assert_eq!(language, &None),
+        other => panic!("expected code block, got {other:?}"),
+    }
+
+    let extra_info = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```python extra words\n",
+        "x = 1\n",
+        "```\n",
+    );
+    let module = parse_text(extra_info.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::CodeBlock { language, .. } => assert_eq!(language.as_deref(), Some("python")),
+        other => panic!("expected code block, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_inline_triple_backticks_stay_prose() {
+    let src = concat!("document:\n  title: \"T\"\n\n", "```x``` is inline code\n",);
+    let module = parse_text(src.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Paragraph { inlines } => {
+            assert!(inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Code(c) if c == "x")));
+        }
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_malformed_code_blocks_fail() {
+    let unterminated = concat!("document:\n  title: \"T\"\n\n", "```python\n", "x = 1\n",);
+    let err = try_parse_diagnostics(unterminated.as_bytes()).expect_err("unterminated");
+    assert!(err.message.contains("unterminated"), "{}", err.message);
+    let start = unterminated.find("```python").unwrap() as u32;
+    assert_eq!(err.primary.expect("located").byte_start, start);
+
+    let forbidden = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```\n",
+        "print(\"\\end{TerseCode}\")\n",
+        "```\n",
+    );
+    let err = try_parse_diagnostics(forbidden.as_bytes()).expect_err("forbidden sequence");
+    assert!(err.message.contains("TerseCode"), "{}", err.message);
+    let line_start = forbidden.find("print(").unwrap() as u32;
+    assert_eq!(err.primary.expect("located").byte_start, line_start);
+
+    let forbidden_spaced = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```\n",
+        "\\end {TerseCode}\n",
+        "```\n",
+    );
+    assert!(try_parse_diagnostics(forbidden_spaced.as_bytes()).is_err());
+
+    // A content line `\end{lstlisting}` is accepted (harmless under
+    // `TerseCode`).
+    let harmless = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "```\n",
+        "\\end{lstlisting}\n",
+        "```\n",
+    );
+    assert!(try_parse_text(harmless.as_bytes()).is_ok());
+}
+
+#[test]
 fn test_math_rejects_execution() {
     let cases = [
         (

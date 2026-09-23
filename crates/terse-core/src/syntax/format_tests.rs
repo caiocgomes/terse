@@ -91,3 +91,26 @@ fn test_format_preserves_dollar_math() {
     let twice = String::from_utf8(format_source(&file(&once)).expect("valid module")).unwrap();
     assert_eq!(once, twice);
 }
+
+#[test]
+fn test_format_preserves_code_blocks() {
+    let src = "# Title\n\n\n\n```python\nx = 1  \n\tif x:\n\n\n    pass\n```\r\n\nAfter.\n";
+    let f = file(src);
+    let formatted = format_source(&f).expect("valid module");
+    let once = String::from_utf8(formatted).unwrap();
+
+    // Structural spacing outside the block is canonicalized (the extra
+    // blank lines before the fence collapse to one)...
+    assert!(once.starts_with("# Title\n\n"));
+    assert!(!once.contains("Title\n\n\n\n```"), "{once}");
+
+    // ...but the code block's bytes -- trailing spaces, a tab, a blank
+    // line inside it, and its CRLF line ending -- are byte-identical.
+    assert!(
+        once.contains("```python\nx = 1  \n\tif x:\n\n\n    pass\n```\r\n"),
+        "{once}"
+    );
+
+    let twice = String::from_utf8(format_source(&file(&once)).expect("still valid")).unwrap();
+    assert_eq!(once, twice, "formatting must be idempotent");
+}

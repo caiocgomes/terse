@@ -200,7 +200,59 @@ fn render_node(node: &Node, symbols: &SymbolTable, out: &mut String) {
         NodeKind::Bibliography => {
             out.push_str("\\printbibliography\n");
         }
+        NodeKind::CodeBlock { language, code } => {
+            render_code_block(language.as_deref(), code, out);
+        }
     }
+}
+
+/// Maps a code block's language tag, as written, to the `listings`
+/// language name it selects. Closed: only names present in
+/// `lstlang1/2/3.sty`, so `listings` never fails on an undefined
+/// language, and an author's own tag never reaches LaTeX (it only ever
+/// selects a value from this list, closing an injection path through the
+/// option list). An unrecognized or absent tag selects no language.
+fn listings_language_for(tag: &str) -> Option<&'static str> {
+    match tag.to_ascii_lowercase().as_str() {
+        "python" | "py" => Some("Python"),
+        "r" => Some("R"),
+        "sql" => Some("SQL"),
+        "bash" | "sh" | "shell" | "zsh" => Some("bash"),
+        "c" => Some("C"),
+        "cpp" | "c++" => Some("C++"),
+        "java" => Some("Java"),
+        "matlab" => Some("Matlab"),
+        "octave" => Some("Octave"),
+        "html" => Some("HTML"),
+        "xml" => Some("XML"),
+        "go" => Some("Go"),
+        "haskell" => Some("Haskell"),
+        "ruby" => Some("Ruby"),
+        "perl" => Some("Perl"),
+        "php" => Some("PHP"),
+        "scala" => Some("Scala"),
+        "swift" => Some("Swift"),
+        "lua" => Some("Lua"),
+        "fortran" => Some("Fortran"),
+        "tex" | "latex" => Some("TeX"),
+        "make" | "makefile" => Some("make"),
+        _ => None,
+    }
+}
+
+/// Emits a code block through the semantic `TerseCode` environment
+/// (defined by the style layer over `listings`). Content is never
+/// escaped or otherwise rewritten: `listings` renders it verbatim, so
+/// `\input`, `\write18`, and similar sequences inside the code print
+/// literally rather than executing.
+fn render_code_block(language: Option<&str>, code: &str, out: &mut String) {
+    match language.and_then(listings_language_for) {
+        Some(name) => out.push_str(&format!("\\begin{{TerseCode}}[language={name}]\n")),
+        None => out.push_str("\\begin{TerseCode}\n"),
+    }
+    out.push_str(code);
+    out.push('\n');
+    out.push_str("\\end{TerseCode}\n");
 }
 
 fn render_table_row(cells: &[String]) -> String {
@@ -458,6 +510,7 @@ pub const STYLE_PACKAGES: &[&str] = &[
     "booktabs",
     "enumitem",
     "hyperref",
+    "listings",
     "babel",
     "biblatex",
     "eso-pic",
@@ -581,7 +634,12 @@ fn babel_language_for(document_language: &str) -> &'static str {
     }
 }
 
-pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliography_language: Option<&str>) -> String {
+pub fn generate_style(
+    theme: &ResolvedTheme,
+    extra_packages: &[&str],
+    bibliography_language: Option<&str>,
+    has_code: bool,
+) -> String {
     let extra: String = extra_packages
         .iter()
         .map(|p| format!("\\RequirePackage{{{p}}}\n"))
@@ -612,6 +670,22 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
             },
         ),
         None => String::new(),
+    };
+    // `listings` is not yet part of every deployed managed TeX Live
+    // prefix's package closure (it joins the closed package set and the
+    // export profile in this same change, but an already-provisioned
+    // prefix only gets it after a maintainer re-derives and reinstalls
+    // that closure). A module with no code block must keep compiling on
+    // such a prefix, so this loads conditionally, the same reasoning
+    // `bibliography_setup` above applies to `biblatex`/`babel`.
+    let code_setup = if has_code {
+        "\\RequirePackage{listings}\n\
+\\lstset{basicstyle=\\ttfamily, keywordstyle=\\bfseries, commentstyle=\\itshape, \
+columns=fullflexible, keepspaces=true, showstringspaces=false, upquote=true, breaklines=true}\n\
+\\lstnewenvironment{TerseCode}[1][]{\\lstset{#1}}{}\n"
+            .to_string()
+    } else {
+        String::new()
     };
     // Page geometry, only when the theme asks for it: with no page token
     // the class's own layout (letter) applies, which is the plain default.
@@ -863,6 +937,7 @@ pub fn generate_style(theme: &ResolvedTheme, extra_packages: &[&str], bibliograp
 \\RequirePackage{{enumitem}}\n\
 \\RequirePackage{{hyperref}}\n\
 {bibliography_setup}\
+{code_setup}\
 {extra}\
 {body_color}\
 {columns}\
@@ -956,6 +1031,79 @@ mod tests {
     }
 
     #[test]
+    fn test_python_code_block_emits_terse_code() {
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "```python\n",
+            "def f(x):\n",
+            "    return x\n",
+            "```\n",
+        ));
+        assert!(
+            body.contains(
+                "\\begin{TerseCode}[language=Python]\ndef f(x):\n    return x\n\\end{TerseCode}"
+            ),
+            "{body}"
+        );
+
+        let style = generate_style(&theme::academic(), &[], None, true);
+        assert!(style.contains("\\RequirePackage{listings}"), "{style}");
+        assert!(
+            style.contains(
+                "\\lstset{basicstyle=\\ttfamily, keywordstyle=\\bfseries, commentstyle=\\itshape, \
+columns=fullflexible, keepspaces=true, showstringspaces=false, upquote=true, breaklines=true}"
+            ),
+            "{style}"
+        );
+        assert!(style.contains("\\lstnewenvironment{TerseCode}[1][]{\\lstset{#1}}{}"), "{style}");
+
+        // `py` maps to `Python`; `C++` maps to `C++`.
+        assert!(body_of(concat!("document:\n  title: \"T\"\n\n", "```py\nx = 1\n```\n")).contains("[language=Python]"));
+        assert!(
+            body_of(concat!("document:\n  title: \"T\"\n\n", "```cpp\nint x;\n```\n")).contains("[language=C++]")
+        );
+
+        // `listings` is not part of every deployed managed TeX Live
+        // prefix's closure yet (it is added by this change, but an
+        // already-provisioned prefix only gets it once a maintainer
+        // re-derives and reinstalls that closure), so a document with no
+        // code block must keep compiling without it: the style loads
+        // `listings`/`TerseCode` only for documents that actually use a
+        // code block, the same way `bibliography_setup` is conditional.
+        let with_code = generate_style(&theme::academic(), &[], None, true);
+        let without_code = generate_style(&theme::academic(), &[], None, false);
+        assert_ne!(with_code, without_code);
+        assert!(!without_code.contains("listings"), "{without_code}");
+        assert!(!without_code.contains("TerseCode"), "{without_code}");
+    }
+
+    #[test]
+    fn test_unknown_code_tags_emit_plain_environment() {
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "```rust\nfn main() {}\n```\n"
+        ));
+        assert!(
+            body.contains("\\begin{TerseCode}\nfn main() {}\n\\end{TerseCode}"),
+            "{body}"
+        );
+        assert!(!body.contains("[language="), "{body}");
+
+        // A tag that never appears in the closed language map never
+        // reaches LaTeX, even as literal text: it is not the value of any
+        // option this generator ever writes.
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "```x]{evil}\ny\n```\n"
+        ));
+        assert!(!body.contains("evil"), "{body}");
+        assert!(body.contains("\\begin{TerseCode}\ny\n\\end{TerseCode}"), "{body}");
+
+        let body = body_of(concat!("document:\n  title: \"T\"\n\n", "```\nz\n```\n"));
+        assert!(body.contains("\\begin{TerseCode}\nz\n\\end{TerseCode}"), "{body}");
+    }
+
+    #[test]
     fn test_generate_document_is_deterministic_and_untimestamped() {
         let module = ParsedModule {
             file_id: FileId(0),
@@ -1041,7 +1189,7 @@ mod tests {
     /// and keep the body theme-blind).
     #[test]
     fn test_default_style_has_no_font_or_geometry() {
-        let style = generate_style(&theme::academic(), &[], None);
+        let style = generate_style(&theme::academic(), &[], None, false);
         for absent in ["fontspec", "\\setmainfont", "geometry", "libertinus", "lmodern", "tgheros"] {
             assert!(!style.contains(absent), "plain default must not emit {absent}:\n{style}");
         }
@@ -1054,7 +1202,12 @@ mod tests {
     /// filename-based `\setmainfont`.
     #[test]
     fn test_font_token_pulls_fontspec() {
-        let style = generate_style(&resolve_str("body:\n  font: libertinus-otf\n"), &[], None);
+        let style = generate_style(
+            &resolve_str("body:\n  font: libertinus-otf\n"),
+            &[],
+            None,
+            false,
+        );
         assert!(style.contains("\\RequirePackage{fontspec}"));
         assert!(style.contains("\\RequirePackage{libertinus-otf}"));
         assert!(style.contains("\\setmainfont{LibertinusSerif-Regular.otf}"));
@@ -1070,20 +1223,20 @@ mod tests {
     /// them), and a margin overrides the block instead.
     #[test]
     fn test_page_size_alone_reproduces_class_layout() {
-        let plain = generate_style(&theme::academic(), &[], None);
-        let a4 = generate_style(&resolve_str("page:\n  size: a4\n"), &[], None);
+        let plain = generate_style(&theme::academic(), &[], None, false);
+        let a4 = generate_style(&resolve_str("page:\n  size: a4\n"), &[], None, false);
         let a4_line = "\\RequirePackage[a4paper,textwidth=345pt,textheight=598pt,centering]{geometry}\n";
         assert!(a4.contains(a4_line), "got:\n{a4}");
         assert_eq!(a4.replace(a4_line, ""), plain, "the geometry line is the only difference");
 
-        let letter = generate_style(&resolve_str("page:\n  size: letter\n"), &[], None);
+        let letter = generate_style(&resolve_str("page:\n  size: letter\n"), &[], None, false);
         assert!(letter.contains("[letterpaper,textwidth=345pt,textheight=550pt,centering]{geometry}"));
 
-        let margin_only = generate_style(&resolve_str("page:\n  margin: 2.5cm\n"), &[], None);
+        let margin_only = generate_style(&resolve_str("page:\n  margin: 2.5cm\n"), &[], None, false);
         assert!(margin_only.contains("\\RequirePackage[margin=2.5cm]{geometry}"), "got:\n{margin_only}");
         assert!(!margin_only.contains("textwidth"));
 
-        let both = generate_style(&resolve_str("page:\n  size: a4\n  margin: 2.5cm\n"), &[], None);
+        let both = generate_style(&resolve_str("page:\n  size: a4\n  margin: 2.5cm\n"), &[], None, false);
         assert!(both.contains("\\RequirePackage[a4paper,margin=2.5cm]{geometry}"), "got:\n{both}");
         assert!(!both.contains("textwidth"));
     }
@@ -1094,7 +1247,7 @@ mod tests {
     /// own sectioning commands, with no private counters or font switches.
     #[test]
     fn test_headings_delegate_to_sectioning_commands() {
-        let style = generate_style(&theme::academic(), &[], None);
+        let style = generate_style(&theme::academic(), &[], None, false);
         assert!(style.contains("\\newcommand{\\TerseHeadingOne}[1]{\\section{#1}}"), "got:\n{style}");
         assert!(style.contains("\\newcommand{\\TerseHeadingTwo}[1]{\\subsection{#1}}"));
         assert!(style.contains("\\newcommand{\\TerseHeadingThree}[1]{\\subsubsection{#1}}"));
@@ -1107,30 +1260,36 @@ mod tests {
     /// body's own `\phantomsection\label` keeps the anchor.
     #[test]
     fn test_numbering_none_uses_starred_form() {
-        let style = generate_style(&resolve_str("heading.1:\n  numbering: none\n"), &[], None);
+        let style = generate_style(&resolve_str("heading.1:\n  numbering: none\n"), &[], None, false);
         assert!(style.contains("\\newcommand{\\TerseHeadingOne}[1]{\\section*{#1}}"), "got:\n{style}");
         assert!(style.contains("\\newcommand{\\TerseHeadingTwo}[1]{\\subsection{#1}}"), "other levels unchanged");
     }
 
     #[test]
     fn test_numbering_roman_redefines_thesection() {
-        let style = generate_style(&resolve_str("heading.1:\n  numbering: roman\n"), &[], None);
+        let style = generate_style(&resolve_str("heading.1:\n  numbering: roman\n"), &[], None, false);
         assert!(style.contains("\\renewcommand{\\thesection}{\\Roman{section}}"), "got:\n{style}");
         assert!(!style.contains("\\thesubsection"), "only the level that asked for it");
 
-        let level_two = generate_style(&resolve_str("heading.2:\n  numbering: roman\n"), &[], None);
+        let level_two = generate_style(&resolve_str("heading.2:\n  numbering: roman\n"), &[], None, false);
         assert!(
             level_two.contains("\\renewcommand{\\thesubsection}{\\thesection.\\Roman{subsection}}"),
             "the parent prefix is kept:\n{level_two}"
         );
-        assert!(!generate_style(&theme::academic(), &[], None).contains("\\renewcommand{\\thesection}"));
+        assert!(!generate_style(&theme::academic(), &[], None, false)
+            .contains("\\renewcommand{\\thesection}"));
     }
 
     /// A non-default weight re-issues the class's `\@startsection`
     /// definition with the font argument changed; no package is added.
     #[test]
     fn test_heading_weight_redefines_startsection() {
-        let style = generate_style(&resolve_str("heading.1:\n  weight: italic\n"), &[], None);
+        let style = generate_style(
+            &resolve_str("heading.1:\n  weight: italic\n"),
+            &[],
+            None,
+            false,
+        );
         assert!(
             style.contains("\\renewcommand\\section{\\@startsection{section}{1}{\\z@}"),
             "got:\n{style}"
@@ -1139,7 +1298,7 @@ mod tests {
         assert!(!style.contains("\\renewcommand\\subsection"), "only the level that asked for it");
         assert!(!style.contains("titlesec"));
 
-        let bold = generate_style(&resolve_str("heading.1:\n  weight: bold\n"), &[], None);
+        let bold = generate_style(&resolve_str("heading.1:\n  weight: bold\n"), &[], None, false);
         assert!(!bold.contains("\\@startsection"), "bold is the class default");
     }
 
@@ -1148,7 +1307,7 @@ mod tests {
     /// Scenario "Default title block is maketitle".
     #[test]
     fn test_paper_title_block_uses_maketitle() {
-        let style = generate_style(&theme::academic(), &[], None);
+        let style = generate_style(&theme::academic(), &[], None, false);
         assert!(
             style.contains("\\newenvironment{TerseTitleBlock}{\\date{}"),
             "the block opens by clearing the date so \\maketitle never inserts \\today:\n{style}"
@@ -1169,7 +1328,7 @@ mod tests {
     #[test]
     fn test_missing_date_emits_no_today() {
         let body = generate_document(&metadata_module(None, None), &theme::academic());
-        let style = generate_style(&theme::academic(), &[], None);
+        let style = generate_style(&theme::academic(), &[], None, false);
         assert!(!body.contains("\\today"));
         assert!(!style.contains("\\today"));
         assert!(!body.contains("\\TerseDate"), "no date macro for a dateless document");
@@ -1181,13 +1340,13 @@ mod tests {
     /// block: `\maketitle` cannot place a logo or end with a page break.
     #[test]
     fn test_cover_layout_keeps_custom_block() {
-        let cover = generate_style(&resolve_str("title:\n  layout: cover\n"), &[], None);
+        let cover = generate_style(&resolve_str("title:\n  layout: cover\n"), &[], None, false);
         assert!(cover.contains("\\vspace*{2cm}\\TerseLogo\\par\\bigskip"), "got:\n{cover}");
         assert!(cover.contains("\\clearpage"));
         assert!(cover.contains("\\newcommand{\\TerseTitle}[1]{{\\Huge\\bfseries #1\\par}}"));
         assert!(!cover.contains("\\maketitle"));
 
-        let left = generate_style(&resolve_str("title:\n  align: left\n"), &[], None);
+        let left = generate_style(&resolve_str("title:\n  align: left\n"), &[], None, false);
         assert!(left.contains("\\raggedright"), "got:\n{left}");
         assert!(!left.contains("\\maketitle"));
     }

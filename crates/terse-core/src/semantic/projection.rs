@@ -51,6 +51,7 @@ pub enum ProjectedNode {
     TheoremLike { kind: crate::semantic::TheoremKind, title: Option<String>, id: Option<String>, body: Vec<ProjectedNode> },
     Proof { id: Option<String>, of: Option<String>, body: Vec<ProjectedNode> },
     RawTex { payload: String },
+    CodeBlock { language: Option<String>, code: String },
     Bibliography,
 }
 
@@ -113,6 +114,9 @@ fn project_node(node: &Node) -> ProjectedNode {
             body: body.iter().map(project_node).collect(),
         },
         NodeKind::RawTex { payload } => ProjectedNode::RawTex { payload: payload.clone() },
+        NodeKind::CodeBlock { language, code } => {
+            ProjectedNode::CodeBlock { language: language.clone(), code: code.clone() }
+        }
         NodeKind::Bibliography => ProjectedNode::Bibliography,
     }
 }

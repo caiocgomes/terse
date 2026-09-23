@@ -204,7 +204,7 @@ fn test_theme_cannot_inject_raw_tex() {
         "heading.1:\n  weight: bold\n\nlogo:\n  source: assets/logo.png\n",
     )
     .expect("the semantic tokens resolve");
-    let style = crate::latex::generate_style(&theme, &[], None);
+    let style = crate::latex::generate_style(&theme, &[], None, false);
     for forbidden in ["INJECTED", "\\input", "/etc/passwd", "\\bold"] {
         assert!(
             !style.contains(forbidden),
@@ -214,7 +214,7 @@ fn test_theme_cannot_inject_raw_tex() {
     // `bold` is the class's own heading weight, so it emits no
     // redefinition at all; a non-default token maps to the real command.
     let italic = resolve_str("academic", "heading.1:\n  weight: italic\n").unwrap();
-    let italic_style = crate::latex::generate_style(&italic, &[], None);
+    let italic_style = crate::latex::generate_style(&italic, &[], None, false);
     assert!(italic_style.contains("\\itshape"), "`italic` maps to the real command");
     assert!(!italic_style.contains("\\italic"), "the token itself never becomes a control sequence");
 }
@@ -255,7 +255,7 @@ fn test_theorem_kind_overrides_base() {
 
     // And the distinction survives into the generated style, which is
     // where it actually has to matter.
-    let style = crate::latex::generate_style(&base_then_kind, &[], None);
+    let style = crate::latex::generate_style(&base_then_kind, &[], None, false);
     assert_eq!(governing_theorem_style(&style, "terselemma"), "remark");
     assert_eq!(governing_theorem_style(&style, "tersetheorem"), "plain");
     assert_eq!(governing_theorem_style(&style, "terseexample"), "plain");
@@ -501,10 +501,10 @@ fn test_furniture_excluded_from_authored_ast() {
     // The other half: the furnished theme really does draw this furniture,
     // from the style layer. Without this, a theme that silently dropped
     // its watermark and logo would satisfy the test above perfectly.
-    let style = crate::latex::generate_style(&furnished, &[], None);
+    let style = crate::latex::generate_style(&furnished, &[], None, false);
     assert!(style.contains("INTERNAL USE"), "the watermark is drawn by the style");
     assert!(style.contains("TerseLogo"), "the logo is defined by the style");
-    let plain_style = crate::latex::generate_style(&plain, &[], None);
+    let plain_style = crate::latex::generate_style(&plain, &[], None, false);
     assert!(
         !plain_style.contains("INTERNAL USE"),
         "a theme without a watermark draws none"
@@ -574,7 +574,7 @@ fn test_every_accepted_property_reaches_the_style() {
     let theme = resolve_str("coverage", &text).expect("the coverage theme resolves");
     // `Some(language)` so the BibLaTeX line exists and `citation.style` has
     // somewhere to land.
-    let style = crate::latex::generate_style(&theme, &[], Some("en"));
+    let style = crate::latex::generate_style(&theme, &[], Some("en"), false);
     for (component, role, property, value, expected) in rows {
         let selector = match role {
             Some(r) => format!("{component}[role={r}]"),

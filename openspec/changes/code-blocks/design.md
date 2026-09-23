@@ -68,22 +68,23 @@ The existing consumers keep working unchanged: `parse_opaque_payload` still stri
 
 ### D4. Emission through a semantic `TerseCode` environment
 
-- **Style layer.** `listings` joins the always-loaded core set (like `booktabs`), so the style stays independent of content, as it is today apart from the bibliography. The style adds:
+- **Style layer, loaded conditionally.** `listings` was going to join the always-loaded core set (like `booktabs`), matching how the style stays independent of content everywhere except the bibliography -- but `listings` is not yet part of any already-deployed managed TeX Live prefix's package closure (this change adds it to the closed set and the export profile, D5, but an already-provisioned prefix only gets the package after a maintainer re-derives and reinstalls that closure, which needs network access, task 4.3). Loading it unconditionally was tried first and reverted after it broke eight pre-existing tests that compile a real PDF and never touch a code block (`test_unicode_text_and_bibliography_compile`, `test_watch_keeps_last_good_pdf_after_syntax_error`, and five more in `latex_generation.rs`) against this machine's already-installed, not-yet-re-derived prefix -- confirmed by `git stash` showing them green on the pre-change commit and red on this one. `generate_style` gains a `has_code: bool` parameter (mirroring `bibliography_language: Option<&str>`), and `crate::semantic::has_code_block` (mirroring `has_bibliography`) supplies it from the module at the one production call site (`artifact/mod.rs`). The style adds, only when the document has a code block:
 
   ```latex
+  \RequirePackage{listings}
   \lstset{basicstyle=\ttfamily, keywordstyle=\bfseries, commentstyle=\itshape,
     columns=fullflexible, keepspaces=true, showstringspaces=false,
     upquote=true, breaklines=true}
   \lstnewenvironment{TerseCode}[1][]{\lstset{#1}}{}
   ```
 
-  This is the tested setting set. It uses no color and no size change (like `verbatim`), and long lines wrap instead of running into the margin.
+  This is the tested setting set. It uses no color and no size change (like `verbatim`), and long lines wrap instead of running into the margin. `check_requirements` (`artifact/profile.rs`, the arXiv export gate) already only validates explicitly-declared `[latex] packages` plus font/babel, never the always-vs-conditional core set at runtime, so conditional loading needed no change there; `STYLE_PACKAGES` already lists conditionally-emitted members (`babel`, `biblatex`), so `listings` sitting beside them is the established pattern, not a new one.
 - **Body.** `\begin{TerseCode}[language=<Name>]`, the code bytes, then `\end{TerseCode}`. It is plain `\begin{TerseCode}` when the tag is absent or unknown.
 - **Language map.** Closed: a lower-cased tag → a `listings` name, containing only names present in `lstlang1/2/3.sty`. For example: `python`/`py` → `Python`, `r` → `R`, `sql` → `SQL`, `bash`/`sh`/`shell`/`zsh` → `bash`, `c` → `C`, `cpp`/`c++` → `C++`, `java` → `Java`, `matlab` → `Matlab`, `octave` → `Octave`, `html` → `HTML`, `xml` → `XML`, `go` → `Go`, `haskell` → `Haskell`, `ruby` → `Ruby`, `perl` → `Perl`, `php` → `PHP`, `scala` → `Scala`, `swift` → `Swift`, `lua` → `Lua`, `fortran` → `Fortran`, `tex`/`latex` → `TeX`, `make`/`makefile` → `make`. `listings` fails hard on an undefined language (tested: `[language=Rust]` stops the compile with "Couldn't load requested language"), so only map values reach LaTeX. The author's tag never does, which also closes an injection path through the option list.
 
 ### D5. Package closure
 
-`"listings"` is added to `STYLE_PACKAGES` and to the export profile's `packages`. `tests/fixtures/full-paper` gains a Python code block, so the recorder sees `listings.sty` and its language files. `scripts/derive-toolchain-closure.sh` then regenerates `[closure].derived`. The script needs network access to the pinned repository, and its output is committed as data. The managed prefix installs the new closure the next time the toolchain is installed or updated.
+`"listings"` is added to `STYLE_PACKAGES` and to the export profile's `packages`. Adding a Python code block to `tests/fixtures/full-paper` was tried, so the closure-derivation recorder would see `listings.sty` and its language files -- but that fixture is shared by many unrelated real-PDF tests (themes, multi-file projects, arXiv export, toolchain, git-oriented tooling), and since `listings` is not part of any already-provisioned managed prefix's closure yet, adding a code block there broke sixteen of them (confirmed by `git stash`). Reverted; the fixture stays as it was. A maintainer running `scripts/derive-toolchain-closure.sh` (which hardcodes `full-paper` as its recorder input) must add a code block to it temporarily for that one derivation, or the script needs its own follow-up change to derive `listings`'s closure from a separate, dedicated fixture -- left as an open item for that maintainer, not solved by this change. Once `[closure].derived` is regenerated by whichever path and committed, the managed prefix installs it the next time the toolchain is installed or updated.
 
 ### D6. `fmt`
 

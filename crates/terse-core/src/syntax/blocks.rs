@@ -166,6 +166,14 @@ pub enum TopBlock {
         payload: String,
         span: SourceSpan,
     },
+    /// A fenced code block. `language` is the fence's first
+    /// whitespace-delimited info-string word, kept as written; `code` is
+    /// the opaque content, kept byte for byte. Carries no ID.
+    CodeBlock {
+        language: Option<String>,
+        code: String,
+        span: SourceSpan,
+    },
     /// The explicit `bibliography` marker: authors place this to control
     /// where the derived bibliography renders. At most one is permitted
     /// per project (task group 12); zero markers with citations present
@@ -241,9 +249,18 @@ pub fn parse_module_with_recovery(
                     break;
                 }
                 // Recover at the next safe structural boundary: the next
-                // line back at module scope (zero indentation).
+                // line back at module scope (zero indentation). Opaque
+                // payload lines (inside an unterminated `math:`/`tex:`
+                // body, `$$` display, or fenced code block) are skipped
+                // regardless of their own `.indent`, which for a `$$` or
+                // fence opened at module scope is fixed at 0 --
+                // indistinguishable from a fresh top-level line -- and
+                // would otherwise make recovery resynchronize on every
+                // single payload line, one spurious diagnostic each.
                 let mut j = i + 1;
-                while j < lines.len() && (lines[j].is_blank || lines[j].indent > 0) {
+                while j < lines.len()
+                    && (lines[j].is_blank || lines[j].opaque || lines[j].indent > 0)
+                {
                     j += 1;
                 }
                 i = j.max(i + 1);
@@ -355,6 +372,17 @@ fn parse_block_sequence<'a>(
                 ));
             }
             let (block, next_i) = parse_dollar_display(lines, source, i, file_id, base)?;
+            blocks.push(block);
+            i = next_i;
+            continue;
+        }
+
+        // Fenced code blocks are accepted in every context, including
+        // list items: unlike `$$`/`math:`, a code block is the one
+        // non-paragraph, non-list construct a list item's continuation
+        // may contain (installation-step snippets are the common case).
+        if let Some(len) = crate::syntax::opaque::fence_len(content) {
+            let (block, next_i) = parse_code_block(lines, source, i, len, file_id, base)?;
             blocks.push(block);
             i = next_i;
             continue;
@@ -641,6 +669,9 @@ fn consume_paragraph<'a>(
             break;
         }
         if content.starts_with("$$") {
+            break;
+        }
+        if crate::syntax::opaque::fence_len(content).is_some() {
             break;
         }
         if starts_with_reserved_word(content).is_some() {
@@ -1212,6 +1243,128 @@ fn parse_dollar_display<'a>(
         header,
         "unterminated display math: no closing '$$'",
     ))
+}
+
+/// Fenced code block: opens at a line [`crate::syntax::opaque::fence_len`]
+/// recognizes (shared with the lexer so the two cannot disagree on what a
+/// fence looks like). The first whitespace-delimited word of the trimmed
+/// info string, if any, becomes the language tag, kept as written; the
+/// rest of the info string is ignored. Closes at the first later line, at
+/// the block's own structural indent, whose content -- after removing
+/// that indent -- [`crate::syntax::opaque::fence_closes`] recognizes as a
+/// closer. Content is never parsed as Terse and is kept byte for byte,
+/// like `math:`/`tex:` payloads, including blank lines, trailing
+/// whitespace, tabs, internal indentation, and original line endings. A
+/// content line containing the rendering environment's end sequence
+/// (`\end{TerseCode}`, tolerating spaces inside the braces) is rejected:
+/// `listings` would close the block there and run the rest as live LaTeX.
+fn parse_code_block<'a>(
+    lines: &[StructLine<'a>],
+    source: &str,
+    start: usize,
+    len: usize,
+    file_id: FileId,
+    base: u32,
+) -> Result<(TopBlock, usize), Diagnostic> {
+    let header = &lines[start];
+    let info = header.content[len..].trim();
+    let language = info.split_whitespace().next().map(|s| s.to_string());
+
+    let strip = (header.indent * 2) as usize;
+    let bytes = source.as_bytes();
+    let line_end = |l: &StructLine<'_>| {
+        if bytes.get(l.byte_end as usize) == Some(&b'\r') {
+            "\r\n"
+        } else {
+            "\n"
+        }
+    };
+
+    let mut parts: Vec<(&str, &str)> = Vec::new();
+    let mut i = start + 1;
+    while i < lines.len() {
+        let line = &lines[i];
+        if !line.is_blank && line.indent < header.indent {
+            break;
+        }
+        let text = if line.is_blank {
+            &source[line.byte_start as usize..line.byte_end as usize]
+        } else {
+            &source[line.byte_start as usize + strip..line.byte_end as usize]
+        };
+        if !line.is_blank && crate::syntax::opaque::fence_closes(text, len) {
+            let mut code = String::new();
+            for (idx, (t, eol)) in parts.iter().enumerate() {
+                code.push_str(t);
+                if idx + 1 < parts.len() {
+                    code.push_str(eol);
+                }
+            }
+            let span = mk_span(file_id, base, header.content_byte_start, line.byte_end);
+            return Ok((
+                TopBlock::CodeBlock {
+                    language,
+                    code,
+                    span,
+                },
+                i + 1,
+            ));
+        }
+        if !line.is_blank && contains_forbidden_code_end_sequence(text) {
+            return Err(malformed(
+                file_id,
+                base,
+                line,
+                "code block content cannot contain '\\end{TerseCode}'",
+            ));
+        }
+        parts.push((text, line_end(line)));
+        i += 1;
+    }
+    Err(malformed(
+        file_id,
+        base,
+        header,
+        "unterminated code block: no closing fence",
+    ))
+}
+
+/// Detects `\end{TerseCode}` (tolerating spaces inside the braces)
+/// anywhere in a code line -- not just at the start, since it is
+/// dangerous mid-line too: `listings` closes its environment at the exact
+/// sequence, and whatever follows on that line, and every line after it,
+/// becomes live LaTeX rather than inert code content. Operates on raw
+/// bytes: every marker byte is ASCII, and ASCII bytes never appear inside
+/// a multi-byte UTF-8 sequence, so byte-level scanning never misaligns
+/// with a `str`'s char boundaries.
+fn contains_forbidden_code_end_sequence(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0usize;
+    while i + 4 <= b.len() {
+        if &b[i..i + 4] == b"\\end" {
+            let mut j = i + 4;
+            while j < b.len() && b[j] == b' ' {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'{' {
+                j += 1;
+                while j < b.len() && b[j] == b' ' {
+                    j += 1;
+                }
+                if j + 9 <= b.len() && &b[j..j + 9] == b"TerseCode" {
+                    let mut k = j + 9;
+                    while k < b.len() && b[k] == b' ' {
+                        k += 1;
+                    }
+                    if k < b.len() && b[k] == b'}' {
+                        return true;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// `tex:` raw block: an opaque payload with the same extraction rules as

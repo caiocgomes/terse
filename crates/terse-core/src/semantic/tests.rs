@@ -134,6 +134,7 @@ fn test_all_mvp_nodes_are_typed() {
             NodeKind::TheoremLike { .. } => "theorem",
             NodeKind::Proof { .. } => "proof",
             NodeKind::RawTex { .. } => "raw_tex",
+            NodeKind::CodeBlock { .. } => "code_block",
             NodeKind::Bibliography => "bibliography",
         })
         .collect();

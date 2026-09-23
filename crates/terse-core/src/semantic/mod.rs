@@ -136,6 +136,14 @@ pub enum NodeKind {
     RawTex {
         payload: String,
     },
+    /// A fenced code block. `language` is the fence's info-string tag as
+    /// written (rendering maps it to a `listings` language, or omits the
+    /// option for an unknown or absent tag); `code` is opaque, emitted
+    /// byte-for-byte, never parsed as Terse or escaped. Carries no ID.
+    CodeBlock {
+        language: Option<String>,
+        code: String,
+    },
     /// The rendered bibliography: either the author's explicit `bibliography`
     /// marker (preserving its authored position) or a derived one appended
     /// when citations exist but no marker was declared. At most one ever
@@ -266,7 +274,11 @@ fn contains_citation(nodes: &[Node]) -> bool {
             .iter()
             .any(|item| inlines_contain_citation(&item.inlines) || contains_citation(&item.continuation)),
         NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => contains_citation(body),
-        NodeKind::Equation { .. } | NodeKind::Table { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => false,
+        NodeKind::Equation { .. }
+        | NodeKind::Table { .. }
+        | NodeKind::RawTex { .. }
+        | NodeKind::CodeBlock { .. }
+        | NodeKind::Bibliography => false,
     })
 }
 
@@ -312,7 +324,10 @@ fn collect_theorem_targets(nodes: &[Node], out: &mut std::collections::HashMap<S
                     collect_theorem_targets(&item.continuation, out);
                 }
             }
-            NodeKind::Paragraph { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => {}
+            NodeKind::Paragraph { .. }
+            | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
+            | NodeKind::Bibliography => {}
         }
     }
 }
@@ -360,6 +375,7 @@ fn walk_proofs(nodes: &[Node], targets: &std::collections::HashMap<String, bool>
             | NodeKind::Figure { .. }
             | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
         }
     }
@@ -418,7 +434,10 @@ fn collect_symbols(nodes: &[Node], out: &mut SymbolTable) {
                     collect_symbols(&item.continuation, out);
                 }
             }
-            NodeKind::Paragraph { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => {}
+            NodeKind::Paragraph { .. }
+            | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
+            | NodeKind::Bibliography => {}
         }
     }
 }
@@ -441,7 +460,11 @@ fn validate_cross_refs(nodes: &[Node], symbols: &SymbolTable) -> Result<(), Diag
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 validate_cross_refs(body, symbols)?;
             }
-            NodeKind::Equation { .. } | NodeKind::Table { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => {}
+            NodeKind::Equation { .. }
+            | NodeKind::Table { .. }
+            | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
+            | NodeKind::Bibliography => {}
         }
     }
     Ok(())
@@ -523,7 +546,11 @@ fn check_citations(
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 check_citations(body, known_aliases, sources)?;
             }
-            NodeKind::Equation { .. } | NodeKind::Table { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => {}
+            NodeKind::Equation { .. }
+            | NodeKind::Table { .. }
+            | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
+            | NodeKind::Bibliography => {}
         }
     }
     Ok(())
@@ -607,6 +634,26 @@ pub fn has_bibliography(module: &ParsedModule) -> bool {
     any_bib(&module.blocks)
 }
 
+/// True if the module contains at least one fenced code block. Used to
+/// decide whether generated LaTeX needs to load `listings` at all: a
+/// module with no code block never pays for that dependency, the same
+/// reasoning [`has_bibliography`] applies to `biblatex`/`biber`. This
+/// matters beyond tidiness: `listings` is not yet part of every deployed
+/// managed TeX Live prefix's package closure (it is added by this same
+/// change), so a document that never uses a code block must keep
+/// compiling on a prefix that has not been updated to include it.
+pub fn has_code_block(module: &ParsedModule) -> bool {
+    fn any_code(nodes: &[Node]) -> bool {
+        nodes.iter().any(|n| match &n.kind {
+            NodeKind::CodeBlock { .. } => true,
+            NodeKind::List { items, .. } => items.iter().any(|i| any_code(&i.continuation)),
+            NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => any_code(body),
+            _ => false,
+        })
+    }
+    any_code(&module.blocks)
+}
+
 /// Every alias actually cited anywhere in the module, in no particular
 /// order (a `BTreeSet` for deterministic iteration). The caller
 /// intersects this with the project's authorized/bound aliases to decide
@@ -634,7 +681,11 @@ fn collect_cited_in_nodes(nodes: &[Node], out: &mut std::collections::BTreeSet<S
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 collect_cited_in_nodes(body, out);
             }
-            NodeKind::Equation { .. } | NodeKind::Table { .. } | NodeKind::RawTex { .. } | NodeKind::Bibliography => {}
+            NodeKind::Equation { .. }
+            | NodeKind::Table { .. }
+            | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
+            | NodeKind::Bibliography => {}
         }
     }
 }
@@ -772,6 +823,14 @@ fn lower_block(block: TopBlock) -> Result<Node, Diagnostic> {
             kind: NodeKind::RawTex { payload },
             span,
         }),
+        TopBlock::CodeBlock {
+            language,
+            code,
+            span,
+        } => Ok(Node {
+            kind: NodeKind::CodeBlock { language, code },
+            span,
+        }),
         TopBlock::Bibliography { span } => Ok(Node {
             kind: NodeKind::Bibliography,
             span,
@@ -902,6 +961,7 @@ fn collect_raw_tex_node_spans(nodes: &[Node], out: &mut Vec<SourceSpan>) {
             | NodeKind::Equation { .. }
             | NodeKind::Figure { .. }
             | NodeKind::Table { .. }
+            | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
         }
     }
@@ -930,6 +990,7 @@ fn collect_node_warnings(nodes: &[Node], out: &mut Vec<Diagnostic>) {
             | NodeKind::Equation { .. }
             | NodeKind::Figure { .. }
             | NodeKind::Table { .. }
+            | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
         }
     }

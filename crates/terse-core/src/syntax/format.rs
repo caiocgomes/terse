@@ -27,7 +27,9 @@ use crate::syntax::lexer;
 fn collect_opaque_ranges(blocks: &[TopBlock], base: u32, out: &mut Vec<(u32, u32)>) {
     for block in blocks {
         match block {
-            TopBlock::Equation { span, .. } | TopBlock::RawTex { span, .. } => {
+            TopBlock::Equation { span, .. }
+            | TopBlock::RawTex { span, .. }
+            | TopBlock::CodeBlock { span, .. } => {
                 out.push((span.byte_start, span.byte_end));
             }
             TopBlock::TheoremLike { body, .. } | TopBlock::Proof { body, .. } => {

@@ -57,7 +57,7 @@ fn test_empty_theme_equals_defaults() {
     let empty = resolve_theme("academic", &source).expect("a comment-only theme resolves");
     assert_eq!(empty, terse_core::theme::academic());
 
-    let style = terse_core::latex::generate_style(&empty, &[], None);
+    let style = terse_core::latex::generate_style(&empty, &[], None, false);
     for absent in ["fontspec", "\\setmainfont", "geometry", "libertinus"] {
         assert!(!style.contains(absent), "the plain default must not load {absent}:\n{style}");
     }

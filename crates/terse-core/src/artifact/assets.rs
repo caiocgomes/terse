@@ -58,6 +58,7 @@ fn collect_into(nodes: &[Node], out: &mut Vec<String>) {
             | NodeKind::Equation { .. }
             | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
         }
     }
@@ -127,6 +128,7 @@ pub fn rewrite_figure_paths(nodes: &mut [Node], map: &std::collections::HashMap<
             | NodeKind::Equation { .. }
             | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
+            | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
         }
     }

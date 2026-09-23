@@ -210,7 +210,11 @@ fn walk_block(
         TopBlock::Bibliography { span } => {
             declare_bibliography_marker(*span, route, out)?;
         }
-        TopBlock::Document { .. } | TopBlock::Paragraph { .. } | TopBlock::RawTex { .. } | TopBlock::Include { .. } => {}
+        TopBlock::Document { .. }
+        | TopBlock::Paragraph { .. }
+        | TopBlock::RawTex { .. }
+        | TopBlock::CodeBlock { .. }
+        | TopBlock::Include { .. } => {}
     }
     Ok(())
 }

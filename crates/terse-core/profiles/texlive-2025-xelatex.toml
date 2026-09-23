@@ -38,6 +38,7 @@ packages = [
     "booktabs",
     "enumitem",
     "hyperref",
+    "listings",
     "babel",
     "biblatex",
     "eso-pic",

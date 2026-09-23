@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::latex;
 use crate::references::record::NormalizedRecord;
-use crate::semantic::{has_bibliography, ParsedModule};
+use crate::semantic::{has_bibliography, has_code_block, ParsedModule};
 use crate::theme::ResolvedTheme;
 use sha2::{Digest, Sha256};
 
@@ -102,7 +102,13 @@ pub fn plan_source_artifacts_with_support(
         },
         GeneratedFile {
             logical_path: "terse-style.sty".to_string(),
-            bytes: latex::generate_style(theme, extra_packages, bibliography_language).into_bytes(),
+            bytes: latex::generate_style(
+                theme,
+                extra_packages,
+                bibliography_language,
+                has_code_block(module),
+            )
+            .into_bytes(),
         },
         GeneratedFile {
             logical_path: "references.bib".to_string(),

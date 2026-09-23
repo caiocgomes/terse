@@ -7,7 +7,7 @@ Tests use Rust `#[test]` through `cargo test`, placed as elsewhere in the reposi
 - **Formatter:** `crates/terse-core/src/syntax/format_tests.rs`.
 - **Profile guard:** `crates/terse-core/src/artifact/profile.rs` (existing `test_profile_packages_equal_emitted_set`).
 - **Real engine:** `crates/terse-cli/tests/e2e/latex_generation.rs`, `#[ignore]`d like its neighbors, run with `-- --ignored` against a local XeLaTeX.
-- **Pinned closure:** `crates/terse-cli/tests/e2e/toolchain.rs` (existing `test_pinned_closure_covers_full_paper_inputs`), which becomes meaningful once `full-paper` contains a code block.
+- **Pinned closure:** `crates/terse-cli/tests/e2e/toolchain.rs` (existing `test_pinned_closure_covers_full_paper_inputs`); this change does not add a code block to `full-paper` (that fixture is shared by too many unrelated real-PDF tests to carry a `listings` dependency, confirmed by breaking 16 of them), so this test's assertions are unaffected by code blocks either way.
 
 Four inherited scenarios keep their existing tests, re-run as the regression guard. The lexer change sits on every parse, so the full existing suite, including every `math:`/`tex:`/`$$` byte-preservation test, must stay green unchanged.
 
@@ -125,7 +125,7 @@ Every failure assertion checks the diagnostic code and that its span starts at t
 - **Setup (GIVEN)**: a document with a ```` ```python ```` block containing `def f(x):` and `    return x`
 - **Action (WHEN)**: generate the body and `generate_style` for the plain default theme
 - **Assert (THEN)**: the body contains `\begin{TerseCode}[language=Python]\ndef f(x):\n    return x\n\end{TerseCode}`; the style contains `\RequirePackage{listings}`, the `\lstset` with `keywordstyle=\bfseries` and `commentstyle=\itshape` and no `\color`, and `\lstnewenvironment{TerseCode}`
-- **Edge cases**: `py` maps to `Python`; `C++` maps to `C++`; the style is identical for documents with and without code blocks
+- **Edge cases**: `py` maps to `Python`; `C++` maps to `C++`; the style for a document with no code block contains neither `listings` nor `TerseCode` and differs from the with-code style (`listings` is conditional, D4, so a document with no code block never requires the package)
 
 #### Scenario: Unknown or missing tag
 - **Test type**: unit
@@ -154,7 +154,7 @@ Every failure assertion checks the diagnostic code and that its span starts at t
 - **Test type**: e2e
 - **Test file**: `crates/terse-cli/tests/e2e/toolchain.rs`
 - **Test name**: `test_pinned_closure_covers_full_paper_inputs` (existing)
-- **Setup (GIVEN)**: `tests/fixtures/full-paper` containing a Python code block, and the re-derived closure
+- **Setup (GIVEN)**: `tests/fixtures/full-paper` as it already is (no code block added, see the design's note), and the re-derived closure
 - **Action (WHEN)**: compile the fixture with the recorder under the managed prefix
 - **Assert (THEN)**: every recorded input is owned by a closure package, including `listings.sty` and the Python language file
 
@@ -174,6 +174,7 @@ Every failure assertion checks the diagnostic code and that its span starts at t
 | language-parsing | Nested lists and three heading levels | `syntax/tests.rs` | `test_headings_and_nested_lists` | unit |
 | language-parsing | Nonsequential ordered markers | `syntax/tests.rs` | `test_ordered_markers_are_sequential` | unit |
 | latex-generation | Tagged Python block | `latex/mod.rs` | `test_python_code_block_emits_terse_code` | unit |
+| latex-generation | A document without code blocks never requires listings | `latex/mod.rs` | `test_python_code_block_emits_terse_code` | unit |
 | latex-generation | Unknown or missing tag | `latex/mod.rs` | `test_unknown_code_tags_emit_plain_environment` | unit |
 | latex-generation | Code is inert in the PDF | `terse-cli/tests/e2e/latex_generation.rs` | `test_code_block_is_inert_in_pdf` | e2e |
 | latex-generation | Package set stays closed | `artifact/profile.rs`, `terse-cli/tests/e2e/toolchain.rs` | `test_profile_packages_equal_emitted_set`, `test_pinned_closure_covers_full_paper_inputs` | unit, e2e |
