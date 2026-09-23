@@ -61,8 +61,13 @@ CLEAN_ENV=(env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v pe
 "${CLEAN_ENV[@]}" perl "$INSTALLER/install-tl" -no-gui -profile "$WORK/install.profile" -repository "$REPO" > "$WORK/install-tl.log" 2>&1
 BIN=$(ls -d "$TEXDIR"/bin/*/ | head -1); BIN="${BIN%/}"
 
-# 2. Current closure (derived + manual) so the compile has a chance to finish.
+# 2. Current closure (derived + manual) so the compile has a chance to finish,
+# plus EXTRA: packages a change newly emits that the pinned closure does not
+# have yet (e.g. EXTRA=listings). EXTRA only lets the compile finish; the
+# printed list still comes from what the recorder saw, so an unneeded extra
+# package never reaches it.
 PKGS=$(awk '/^derived = \[/,/^\]/{print} /^manual = \[/,/^\]/{print}' "$PROFILE_TOML" | grep -o '"[^"]*"' | tr -d '"' | tr '\n' ' ')
+PKGS="$PKGS ${EXTRA:-}"
 "${CLEAN_ENV[@]}" PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin" tlmgr --repository "$REPO" install $PKGS > "$WORK/tlmgr.log" 2>&1
 
 # 3. Full catalog for ownership mapping (RELOC/ prefix means texmf-dist/).

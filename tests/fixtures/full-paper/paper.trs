@@ -26,6 +26,12 @@ A paragraph with a footnote^[an aside] and a forward reference to
 strength is **bold**, and here is `inline code`. See the
 [Terse project](https://example.org/terse) for more.
 
+```python
+def compile_deterministically(source: str) -> str:
+    # A minimal illustration; no execution occurs when this renders.
+    return source.strip()
+```
+
 - first unordered item
 - second unordered item
 

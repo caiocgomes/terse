@@ -49,7 +49,7 @@ sha512 = "a307d7d11bcbd1f054ad0b0d476f7f12bc1a40d07445020edef8713b44453831d18a2f
 # at format-generation time, font files opened by the output driver rather
 # than by TeX, and the built-in `tikz` support (`pgf`) for raw-TeX builds.
 [closure]
-derived-from = "tests/fixtures/full-paper: academic, magalu, magalu with language pt-BR; 2026-09-20"
+derived-from = "tests/fixtures/full-paper: academic, magalu, magalu with language pt-BR; 2026-09-23"
 derived = [
     "amscls",
     "amsfonts",
@@ -85,6 +85,7 @@ derived = [
     "l3packages",
     "latex",
     "libertinus-otf",
+    "listings",
     "logreq",
     "ltxcmds",
     "pdfescape",
