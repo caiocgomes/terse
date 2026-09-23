@@ -271,7 +271,9 @@ fn test_raw_tex_undefined_reference_fails_against_real_engine() {
 #[ignore = "requires a local XeLaTeX distribution"]
 fn test_dollar_display_does_not_consume_equation_number() {
     let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let _engine_guard = crate::common::ENGINE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let tmp = tempdir("dollar-display-numbering");
     fs::write(
         tmp.join("terse.toml"),
@@ -290,10 +292,19 @@ fn test_dollar_display_does_not_consume_equation_number() {
     )
     .unwrap();
 
-    let code = terse_cli::run(["terse", "build", "--require-pdf", "--theme", "academic"], &tmp);
+    let code = terse_cli::run(
+        ["terse", "build", "--require-pdf", "--theme", "academic"],
+        &tmp,
+    );
     assert_eq!(code, 0);
     let text = crate::common::pdf::extract_text(&tmp.join("build/academic/paper.pdf"));
     assert!(text.contains("REFA1"), "eq-a must be number 1:\n{text}");
-    assert!(text.contains("REFB2"), "eq-b must be number 2, not 3:\n{text}");
-    assert!(!text.contains("(3)"), "the $$ display must not be numbered:\n{text}");
+    assert!(
+        text.contains("REFB2"),
+        "eq-b must be number 2, not 3:\n{text}"
+    );
+    assert!(
+        !text.contains("(3)"),
+        "the $$ display must not be numbered:\n{text}"
+    );
 }

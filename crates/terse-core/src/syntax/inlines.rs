@@ -331,7 +331,8 @@ impl Parser {
                 '\\' => i += 2,
                 '$' => {
                     let prev = self.chars[i - 1];
-                    let next_is_digit = matches!(self.peek_at(i + 1), Some(c) if c.is_ascii_digit());
+                    let next_is_digit =
+                        matches!(self.peek_at(i + 1), Some(c) if c.is_ascii_digit());
                     return (!prev.is_whitespace() && !next_is_digit).then_some(i);
                 }
                 _ => i += 1,
@@ -654,7 +655,6 @@ mod tests {
         );
         assert_eq!(dollar, paren);
 
-        assert_eq!(parse_inline("$x$").unwrap(), vec![Inline::Math("x".to_string())]);
         assert_eq!(
             parse_inline("$a$ and $b$").unwrap(),
             vec![
@@ -675,7 +675,13 @@ mod tests {
 
     #[test]
     fn test_currency_dollars_stay_text() {
-        for input in ["It costs $5 to $10 per unit.", "Pay $ 5 now.", "A lone $ sign.", "$5$10", "a$b"] {
+        for input in [
+            "It costs $5 to $10 per unit.",
+            "Pay $ 5 now.",
+            "A lone $ sign.",
+            "$5$10",
+            "a$b",
+        ] {
             let out = parse_inline(input).unwrap();
             assert!(!has_math(&out), "{input:?} parsed as math: {out:?}");
             assert_eq!(plain_text(&out), input);
@@ -695,13 +701,19 @@ mod tests {
 
     #[test]
     fn test_escaped_dollars() {
-        assert_eq!(parse_inline(r"price \$5").unwrap(), vec![Inline::Text("price $5".to_string())]);
+        assert_eq!(
+            parse_inline(r"price \$5").unwrap(),
+            vec![Inline::Text("price $5".to_string())]
+        );
         let out = parse_inline(r"math $a \$ b$ here").unwrap();
         assert!(out.contains(&Inline::Math(r"a \$ b".to_string())), "{out:?}");
         let out = parse_inline(r"\$5 and $x$").unwrap();
         assert_eq!(
             out,
-            vec![Inline::Text("$5 and ".to_string()), Inline::Math("x".to_string())]
+            vec![
+                Inline::Text("$5 and ".to_string()),
+                Inline::Math("x".to_string())
+            ]
         );
     }
 

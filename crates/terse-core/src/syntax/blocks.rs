@@ -1093,7 +1093,15 @@ fn parse_equation<'a>(
         header.byte_end
     };
     let span = mk_span(file_id, base, header.content_byte_start, end);
-    Ok((TopBlock::Equation { id, numbered: true, payload, span }, next_i))
+    Ok((
+        TopBlock::Equation {
+            id,
+            numbered: true,
+            payload,
+            span,
+        },
+        next_i,
+    ))
 }
 
 /// `$$ ... $$` display math: unnumbered, no attributes. Closes on the
@@ -1113,15 +1121,34 @@ fn parse_dollar_display<'a>(
 
     if let Some(close) = after.find("$$") {
         if !after[close + 2..].trim().is_empty() {
-            return Err(malformed(file_id, base, header, "unexpected text after the closing '$$'"));
+            return Err(malformed(
+                file_id,
+                base,
+                header,
+                "unexpected text after the closing '$$'",
+            ));
         }
         let span = mk_span(file_id, base, header.content_byte_start, header.byte_end);
         let payload = after[..close].to_string();
-        return Ok((TopBlock::Equation { id: None, numbered: false, payload, span }, start + 1));
+        return Ok((
+            TopBlock::Equation {
+                id: None,
+                numbered: false,
+                payload,
+                span,
+            },
+            start + 1,
+        ));
     }
 
     let bytes = source.as_bytes();
-    let line_end = |l: &StructLine<'_>| if bytes.get(l.byte_end as usize) == Some(&b'\r') { "\r\n" } else { "\n" };
+    let line_end = |l: &StructLine<'_>| {
+        if bytes.get(l.byte_end as usize) == Some(&b'\r') {
+            "\r\n"
+        } else {
+            "\n"
+        }
+    };
     let mut parts: Vec<(&str, &str)> = Vec::new();
     if !after.trim().is_empty() {
         parts.push((after, line_end(header)));
@@ -1132,7 +1159,11 @@ fn parse_dollar_display<'a>(
         if !line.is_blank && line.indent < header.indent {
             break;
         }
-        let text = if line.is_blank { "" } else { &source[line.byte_start as usize + strip..line.byte_end as usize] };
+        let text = if line.is_blank {
+            ""
+        } else {
+            &source[line.byte_start as usize + strip..line.byte_end as usize]
+        };
         if let Some(close) = text.find("$$") {
             if !text[close + 2..].trim().is_empty() {
                 return Err(malformed(file_id, base, line, "unexpected text after the closing '$$'"));
@@ -1149,12 +1180,25 @@ fn parse_dollar_display<'a>(
                 }
             }
             let span = mk_span(file_id, base, header.content_byte_start, line.byte_end);
-            return Ok((TopBlock::Equation { id: None, numbered: false, payload, span }, i + 1));
+            return Ok((
+                TopBlock::Equation {
+                    id: None,
+                    numbered: false,
+                    payload,
+                    span,
+                },
+                i + 1,
+            ));
         }
         parts.push((text, line_end(line)));
         i += 1;
     }
-    Err(malformed(file_id, base, header, "unterminated display math: no closing '$$'"))
+    Err(malformed(
+        file_id,
+        base,
+        header,
+        "unterminated display math: no closing '$$'",
+    ))
 }
 
 /// `tex:` raw block: an opaque payload with the same extraction rules as

@@ -912,7 +912,8 @@ mod tests {
     /// Runs the real front end (lex, block parse, lower) so generation
     /// tests can start from `.trs` text rather than hand-built nodes.
     fn parse_src(text: &str) -> ParsedModule {
-        let file = crate::source::SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec()).unwrap();
+        let file = crate::source::SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec())
+            .unwrap();
         let lines = crate::syntax::lexer::lex_lines(file.text()).unwrap();
         let blocks = crate::syntax::blocks::parse_module(&lines, file.text(), file.id, file.base_offset()).unwrap();
         crate::semantic::lower(blocks, file.id).unwrap()

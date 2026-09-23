@@ -504,7 +504,11 @@ fn test_theorem_proof_equation_structure() {
             assert_eq!(of.as_deref(), Some("transfer"));
             assert_eq!(body.len(), 2);
             match &body[1].kind {
-                NodeKind::Equation { id, numbered, payload } => {
+                NodeKind::Equation {
+                    id,
+                    numbered,
+                    payload,
+                } => {
                     assert_eq!(id.as_deref(), Some("transfer-eq"));
                     assert!(*numbered, "math: equations are numbered");
                     assert!(payload.contains("\\dot V"));
@@ -829,7 +833,10 @@ fn test_dollar_math_rejects_execution() {
     let pairs = [
         (r"$\input{evil}$", r"\(\input{evil}\)"),
         (r"$\write18{x}$", r"\(\write18{x}\)"),
-        (r"$\frac{\csname x\endcsname}{2}$", r"\(\frac{\csname x\endcsname}{2}\)"),
+        (
+            r"$\frac{\csname x\endcsname}{2}$",
+            r"\(\frac{\csname x\endcsname}{2}\)",
+        ),
     ];
     for (dollar, paren) in pairs {
         let dollar_src = format!("document:\n  title: \"T\"\n\nUnsafe: {dollar}\n");
@@ -842,7 +849,11 @@ fn test_dollar_math_rejects_execution() {
 
 fn equation_parts(node: &crate::semantic::Node) -> (Option<&str>, bool, &str) {
     match &node.kind {
-        NodeKind::Equation { id, numbered, payload } => (id.as_deref(), *numbered, payload.as_str()),
+        NodeKind::Equation {
+            id,
+            numbered,
+            payload,
+        } => (id.as_deref(), *numbered, payload.as_str()),
         other => panic!("expected equation, got {other:?}"),
     }
 }
@@ -853,13 +864,19 @@ fn test_multiline_dollar_display_splits_paragraph() {
     let module = parse_text(src.as_bytes());
     assert_eq!(module.blocks.len(), 3, "{:?}", module.blocks);
     assert_eq!(node_text(&module.blocks[0]), "where");
-    assert_eq!(equation_parts(&module.blocks[1]), (None, false, "a = b +\n  c"));
+    assert_eq!(
+        equation_parts(&module.blocks[1]),
+        (None, false, "a = b +\n  c")
+    );
     assert_eq!(node_text(&module.blocks[2]), "holds.");
 
     // CRLF inside the payload survives.
     let crlf = "document:\r\n  title: \"T\"\r\n\r\n$$\r\na = b +\r\n  c\r\n$$\r\n";
     let module = parse_text(crlf.as_bytes());
-    assert_eq!(equation_parts(&module.blocks[0]), (None, false, "a = b +\r\n  c"));
+    assert_eq!(
+        equation_parts(&module.blocks[0]),
+        (None, false, "a = b +\r\n  c")
+    );
 
     // Accepted inside a theorem body, nested under it.
     let thm = "document:\n  title: \"T\"\n\ntheorem:\n  Claim.\n  $$\n  x = y\n  $$\n";
@@ -878,11 +895,17 @@ fn test_single_line_dollar_display() {
     let src = "document:\n  title: \"T\"\n\n$$ E = mc^2 $$\n";
     let module = parse_text(src.as_bytes());
     assert_eq!(module.blocks.len(), 1);
-    assert_eq!(equation_parts(&module.blocks[0]), (None, false, " E = mc^2 "));
+    assert_eq!(
+        equation_parts(&module.blocks[0]),
+        (None, false, " E = mc^2 ")
+    );
 
     let split = "document:\n  title: \"T\"\n\n$$ a = b +\nc $$\n";
     let module = parse_text(split.as_bytes());
-    assert_eq!(equation_parts(&module.blocks[0]), (None, false, " a = b +\nc "));
+    assert_eq!(
+        equation_parts(&module.blocks[0]),
+        (None, false, " a = b +\nc ")
+    );
 }
 
 #[test]
@@ -890,7 +913,11 @@ fn test_malformed_dollar_display_fails() {
     let head = "document:\n  title: \"T\"\n\n";
     let cases = [
         (format!("{head}$$\nx\n"), "$$", "unterminated"),
-        (format!("{head}$$ x $$ trailing\n"), "$$ x $$ trailing", "after"),
+        (
+            format!("{head}$$ x $$ trailing\n"),
+            "$$ x $$ trailing",
+            "after",
+        ),
         (format!("{head}- item\n  $$ x $$\n"), "$$ x $$", "list item"),
     ];
     for (src, at, needle) in cases {

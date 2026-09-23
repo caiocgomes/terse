@@ -419,7 +419,8 @@ fn test_projection_retains_effective_bibliography() {
 #[test]
 fn test_projection_distinguishes_numbered_equations() {
     let project_src = |text: &str| {
-        let file = SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec()).expect("valid source");
+        let file = SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec())
+            .expect("valid source");
         let (_, plan) = compile(&InputSnapshot::single(file));
         let p = plan.expect("plan");
         crate::semantic::projection::project(&p.module, &p.bindings.authorized)
@@ -432,6 +433,14 @@ fn test_projection_distinguishes_numbered_equations() {
         crate::semantic::projection::digest(&unnumbered)
     );
     let eqs = |p: &crate::semantic::projection::Projection| format!("{p:?}");
-    assert!(eqs(&numbered).contains("numbered: true, payload: \"x = y\""), "{}", eqs(&numbered));
-    assert!(eqs(&unnumbered).contains("numbered: false, payload: \"x = y\""), "{}", eqs(&unnumbered));
+    assert!(
+        eqs(&numbered).contains("numbered: true, payload: \"x = y\""),
+        "{}",
+        eqs(&numbered)
+    );
+    assert!(
+        eqs(&unnumbered).contains("numbered: false, payload: \"x = y\""),
+        "{}",
+        eqs(&unnumbered)
+    );
 }
