@@ -3,9 +3,9 @@
 Today math enters `.trs` two ways:
 
 - Inline `\(...\)`. The inline parser dispatches on `\(` (`crates/terse-core/src/syntax/inlines.rs:139`) and `parse_math` (`inlines.rs:283`) scans to `\)` and emits `Inline::Math(content)`.
-- The `math:` block. The block parser handles it as a reserved word (`crates/terse-core/src/syntax/blocks.rs:405`) and `parse_math_block` (`blocks.rs:1044`) returns `TopBlock::Equation { id, payload, span }`, keeping the payload lines after structural dedent.
+- The `math:` block. The block parser handles it as a reserved word (`crates/terse-core/src/syntax/blocks.rs:405`) and `parse_equation` (`blocks.rs:1036`) returns `TopBlock::Equation { id, payload, span }`, keeping the payload lines after structural dedent.
 
-Validation against the allowlist (`crates/terse-core/src/syntax/math.rs:68`) runs at lowering: `lower_block` for equations and `validate_inline_math` for inline math. Producing the same syntax nodes therefore reuses validation, semantic lowering, LaTeX emission, and source mapping without touching them.
+Validation against the allowlist (`crates/terse-core/src/syntax/math.rs:68`) runs at lowering: `lower_block` for equations and `validate_inline_math` for inline math. Producing the same syntax nodes therefore reuses validation, semantic lowering, and source mapping. Only the unnumbered emission in D3 is new.
 
 Two facts constrain the design:
 
@@ -22,7 +22,7 @@ Two facts constrain the design:
 
 **Non-Goals:**
 
-- Changing `\(...\)`, `math:`, the allowlist, semantic nodes, themes, or LaTeX emission.
+- Changing `\(...\)`, `math:`, the allowlist, or themes. The only change to the semantic model and to emission is the numbered flag in D3.
 - Labels on `$$` equations. An author who needs `{ref: eq-x}` keeps using `math [id: eq-x]:`.
 - Markdown. `compile-markdown` reuses these rules; this change only touches `.trs`.
 
@@ -50,7 +50,7 @@ A line whose content starts with `$$` at a position where a paragraph could star
 - single line: `$$ x^2 $$`;
 - multi-line: an opening line that starts with `$$`, then payload lines, then a line whose content ends with `$$`. Text after `$$` on the opening line and text before `$$` on the closing line belong to the payload.
 
-The payload keeps its line breaks and internal indentation after structural dedent, exactly as `parse_math_block` does. The result is `TopBlock::Equation { id: None, payload, span }`.
+The payload keeps its line breaks and internal indentation after structural dedent, exactly as `parse_equation` does. The result is `TopBlock::Equation { id: None, numbered: false, payload, span }`. `$$` is accepted wherever the language already accepts equations (module scope and theorem/proof bodies), and diagnosed where it does not, such as inside list items, exactly like `math:`.
 
 `consume_paragraph` treats a line starting with `$$` as a paragraph terminator, the same way it already treats reserved words and list markers. Markdown-style writing therefore works: `where\n$$\nE = mc^2\n$$\nholds` produces paragraph, equation, paragraph.
 
@@ -58,9 +58,13 @@ A `$$` found by the inline parser, meaning inside a line that does not start wit
 
 *Alternative considered:* handling `$$` inside the inline parser, the way Pandoc does. Rejected because paragraph lines have already been joined with spaces by that point, so a multi-line formula would lose its bytes. It would also need a new inline-level display node to split a paragraph.
 
-### D3. Numbering of `$$` equations: open, see Open Questions
+### D3. `$$` equations are unnumbered and emitted as `\[...\]`
 
-The proposal says `$$` maps to "the same semantic node as an unlabeled `math:` block". With the current emission, that makes `$$` equations numbered, whereas in LaTeX and in Markdown `$$` is unnumbered. The decision is escalated rather than settled here.
+In LaTeX and in Markdown, `$$` means an unnumbered display. Every `math:` block is numbered today, so `$$` cannot simply reuse the node as it stands. `TopBlock::Equation`, `NodeKind::Equation`, and `ProjectedNode::Equation` gain a `numbered: bool`. `math:` sets it to `true` and `$$` sets it to `false`. The generator emits unnumbered equations as `\[` + payload + `\]` on their own lines. That is plain LaTeX, needs no package, and is what a reader of the generated `.tex` expects. The flag belongs in the projection because numbering is authored meaning: it changes the numbers every later equation gets.
+
+*Alternative considered:* numbering `$$` like `math:` so that no node changes. Rejected because an author pasting `$$` would see a "(1)" they did not ask for, which defeats the point of the change.
+
+*Alternative considered:* a `TerseEquation*` environment. Rejected because themes do not style equations today (`crates/terse-core/src/theme/resolve.rs:40`), so a wrapper adds indirection with no hook to justify it.
 
 ### D4. `fmt` treats the `$$` payload as opaque
 
@@ -70,8 +74,5 @@ The proposal says `$$` maps to "the same semantic node as an unlabeled `math:` b
 
 - [Prose where two dollars satisfy the rule, e.g. `between $5 and 10$`, becomes math] $\rightarrow$ `5 and 10` contains no forbidden command, so it passes validation and silently renders as italic math. The author has to write `\$`. No `.trs` in the repository contains `$`.
 - [`$$` mid-line is an error where Pandoc would accept it] $\rightarrow$ The diagnostic names the fix (move `$$` to its own line). This is a deliberate price for byte preservation.
-- [A paragraph line that legitimately starts with `$$` as text, e.g. `$$ signs are...`] $\rightarrow$ It is parsed as display math and fails validation or termination with a located error. The author writes `\$\$`.
+- [A paragraph line that legitimately starts with `$$` as text, e.g. `$$ signs are...`] $\rightarrow$ It is parsed as display math and fails validation or termination with a located error. The author writes `\$$`, the same backslash escape that already turns a reserved start into literal prose.
 
-## Open Questions
-
-- **Should `$$` be numbered?** Option A (the current proposal text): `$$` produces the same `Equation` node and is numbered like every `math:` block. This needs zero change to semantics, emission, or themes, but it goes against what an author pasting LaTeX or Markdown expects. Option B: add an unnumbered flag to `Equation`, emit `equation*` or `\[...\]` for `$$`, and extend the semantic projection. This matches the convention and is a small change, but it touches `semantic`, `latex`, and possibly themes that style `TerseEquation`. Recommendation: B, because the point of the change is "behave like the standard". It must be confirmed before the specs are written, because it changes the proposal's wording.
