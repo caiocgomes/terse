@@ -37,9 +37,13 @@ diagnostic error — metadata placement is checked, not inferred.
   literal text, so `It costs $5 to $10` stays prose; write `\$` to force
   a literal dollar. Display `$$ ... $$` must start its own line; it may
   close on the same line or on a later one, and it ends a paragraph
-  running above it. `$$` equations are unnumbered (`\[...\]`) and take no
-  id. Use `math [id: ...]:` when an equation needs a number or a
-  `{ref: ...}`.
+  running above it. It cannot contain a blank line or be empty, since
+  TeX ends display math at a paragraph break. `$$` equations are
+  unnumbered (`\[...\]`) and take no id. Use `math [id: ...]:` when an
+  equation needs a number or a `{ref: ...}`. As in Pandoc, a price and a
+  later `$` in the same paragraph pair up even when that `$` sits inside
+  a link URL: `Costs $5 [see](https://x.com/a$b)` turns the text between
+  them into math. Write the price as `\$5` in that case.
 - Explicit raw TeX (`tex:` blocks) for anything outside the restricted
   subset. Raw blocks always emit `W-TEX-001`; `check --deny-warnings`
   turns that into a build failure. Declared support files/packages (e.g.

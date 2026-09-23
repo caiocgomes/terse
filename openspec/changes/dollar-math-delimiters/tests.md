@@ -91,7 +91,7 @@ Block-level failures (`$$` blocks) must carry a span that points at the offendin
 - **Test name**: `test_midline_display_dollars_rejected`
 - **Setup (GIVEN)**: `where $$x$$ holds`
 - **Action (WHEN)**: `parse_inline`
-- **Assert (THEN)**: an `InlineError` whose message mentions putting display math on its own line
+- **Assert (THEN)**: an `InlineError` whose message mentions putting display math on its own line (surfaced as `E-PARSE-050` on the paragraph span)
 - **Edge cases**: `\$$x` stays text (escaped first dollar, then a lone `$`)
 
 #### Scenario: Theorem and proof from the authoring model (existing)
@@ -159,6 +159,15 @@ Block-level failures (`$$` blocks) must carry a span that points at the offendin
 - **Action (WHEN)**: `terse build` with PDF, then extract the PDF text as the neighboring tests do
 - **Assert (THEN)**: the references render as `1` and `2`, and no `(3)` appears
 
+#### Scenario: Blank line or empty dollar display
+- **Test type**: unit
+- **Test file**: `crates/terse-core/src/syntax/tests.rs`
+- **Test name**: `test_blank_or_empty_dollar_display_fails`
+- **Setup (GIVEN)**: `$$`, `x = 1`, blank, `$$` (trailing blank); `$$`, blank, `x = 1`, `$$` (leading blank); `$$ $$`; `$$$$`; `$$` then `$$`
+- **Action (WHEN)**: lex and block parse each
+- **Assert (THEN)**: each fails; blank-line cases name a blank line and point at its byte offset; empty cases name an empty display and point at the opening `$$`
+- **Edge cases**: the trailing-blank case is the one `math:` accepts (it drops trailing blank lines), so it must fail here rather than in the engine
+
 #### Scenario: Malformed dollar display
 - **Test type**: unit
 - **Test file**: `crates/terse-core/src/syntax/tests.rs`
@@ -185,6 +194,7 @@ Block-level failures (`$$` blocks) must carry a span that points at the offendin
 | language-parsing | Multi-line dollar display splits a paragraph | `syntax/tests.rs` | `test_multiline_dollar_display_splits_paragraph` | unit |
 | language-parsing | Single-line dollar display | `syntax/tests.rs`, `syntax/format_tests.rs` | `test_single_line_dollar_display`, `test_format_preserves_dollar_math` | unit |
 | language-parsing | Dollar display does not consume a number | `latex/mod.rs`, `semantic/tests.rs`, `terse-cli/tests/e2e/latex_generation.rs` | `test_unnumbered_dollar_display_emits_brackets`, `test_projection_distinguishes_numbered_equations`, `test_dollar_display_does_not_consume_equation_number` | unit, e2e |
+| language-parsing | Blank line or empty dollar display | `syntax/tests.rs` | `test_blank_or_empty_dollar_display_fails` | unit |
 | language-parsing | Malformed dollar display | `syntax/tests.rs` | `test_malformed_dollar_display_fails` | unit |
 
 All paths are relative to `crates/terse-core/src/` unless shown otherwise.

@@ -1108,6 +1108,9 @@ fn parse_equation<'a>(
 /// same line or on a later line containing `$$`; text between the
 /// delimiters is the payload, with line breaks and indentation beyond the
 /// block's own structural indent kept byte-for-byte, as `math:` does.
+/// TeX ends display math at a paragraph break, so a blank line inside the
+/// delimiters, or an empty payload, is rejected here at its line instead
+/// of failing later in the engine with no source location.
 fn parse_dollar_display<'a>(
     lines: &[StructLine<'a>],
     source: &str,
@@ -1127,6 +1130,9 @@ fn parse_dollar_display<'a>(
                 header,
                 "unexpected text after the closing '$$'",
             ));
+        }
+        if after[..close].trim().is_empty() {
+            return Err(malformed(file_id, base, header, "empty display math"));
         }
         let span = mk_span(file_id, base, header.content_byte_start, header.byte_end);
         let payload = after[..close].to_string();
@@ -1159,11 +1165,15 @@ fn parse_dollar_display<'a>(
         if !line.is_blank && line.indent < header.indent {
             break;
         }
-        let text = if line.is_blank {
-            ""
-        } else {
-            &source[line.byte_start as usize + strip..line.byte_end as usize]
-        };
+        if line.is_blank {
+            return Err(malformed(
+                file_id,
+                base,
+                line,
+                "blank line inside display math; close it with '$$' before the blank line",
+            ));
+        }
+        let text = &source[line.byte_start as usize + strip..line.byte_end as usize];
         if let Some(close) = text.find("$$") {
             if !text[close + 2..].trim().is_empty() {
                 return Err(malformed(file_id, base, line, "unexpected text after the closing '$$'"));
@@ -1171,6 +1181,9 @@ fn parse_dollar_display<'a>(
             let before = &text[..close];
             if !before.trim().is_empty() {
                 parts.push((before, ""));
+            }
+            if parts.is_empty() {
+                return Err(malformed(file_id, base, header, "empty display math"));
             }
             let mut payload = String::new();
             for (idx, (t, eol)) in parts.iter().enumerate() {

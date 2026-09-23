@@ -933,3 +933,36 @@ fn test_malformed_dollar_display_fails() {
     let module = parse_text(escaped.as_bytes());
     assert_eq!(node_text(&module.blocks[0]), "$$ signs are fine");
 }
+
+#[test]
+fn test_blank_or_empty_dollar_display_fails() {
+    let head = "document:\n  title: \"T\"\n\n";
+    // A blank line inside the delimiters is located at the blank line.
+    let trailing = format!("{head}$$\nx = 1\n\n$$\n");
+    let leading = format!("{head}$$\n\nx = 1\n$$\n");
+    for (src, blank_after) in [(&trailing, "x = 1\n"), (&leading, "$$\n")] {
+        let err = try_parse_diagnostics(src.as_bytes()).expect_err(src);
+        assert!(
+            err.message.contains("blank line"),
+            "{src:?}: {}",
+            err.message
+        );
+        let blank_start = (src.find(blank_after).unwrap() + blank_after.len()) as u32;
+        assert_eq!(
+            err.primary.expect("located").byte_start,
+            blank_start,
+            "{src:?}"
+        );
+    }
+    // An empty or whitespace-only payload is located at the opening `$$`.
+    for body in ["$$ $$\n", "$$$$\n", "$$\n$$\n"] {
+        let src = format!("{head}{body}");
+        let err = try_parse_diagnostics(src.as_bytes()).expect_err(&src);
+        assert!(err.message.contains("empty"), "{src:?}: {}", err.message);
+        assert_eq!(
+            err.primary.expect("located").byte_start,
+            head.len() as u32,
+            "{src:?}"
+        );
+    }
+}

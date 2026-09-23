@@ -31,3 +31,10 @@
 - [x] 5.1 Document `$...$`, `$$...$$`, the currency rule, `\$`, and "use `math [id:]:` when you need a number or reference" in `docs/language.md`
 - [x] 5.2 Run the full `cargo test` workspace suite, plus `cargo clippy` and `cargo fmt --check` (clippy: 55 warnings before and after, none new; `fmt --check` already fails on untouched files such as `args.rs`, so it is not a gate here)
 - [x] 5.3 Run `gitnexus_detect_changes` and confirm only the expected symbols changed; commit and reindex
+
+## 6. Verification follow-ups
+
+- [x] 6.1 Write test: `test_blank_or_empty_dollar_display_fails`. Confirm it fails.
+- [x] 6.2 Reject a blank line inside `$$` at that line, and an empty or whitespace-only payload at the opening `$$` [tests: test_blank_or_empty_dollar_display_fails]
+- [x] 6.3 Spec: add the blank/empty rule and scenario; reword "Mid-line display dollars are rejected" to the paragraph-level `E-PARSE-050` it actually produces
+- [x] 6.4 Design: correct D2's parity claim with `math:`; add the URL-closes-a-price risk (same output as Pandoc 3.11); docs: document both

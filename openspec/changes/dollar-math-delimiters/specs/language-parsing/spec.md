@@ -36,12 +36,12 @@ The parser SHALL support paragraphs, `*emphasis*`, `**strong**`, links `[label](
 
 #### Scenario: Mid-line display dollars are rejected
 - **WHEN** a paragraph line contains `where $$x$$ holds`
-- **THEN** parsing fails at the `$$` with guidance to put display math on its own line
+- **THEN** parsing fails with `E-PARSE-050` on that paragraph, with guidance to put display math on its own line
 
 ### Requirement: Equations and theorem-like blocks
 The language SHALL support `math [id: name]:` display blocks; theorem, proposition, lemma, definition, example, and remark blocks with optional titles/IDs; and proof blocks with optional `id` and `of` attributes. Bodies SHALL support paragraphs, lists, equations, figures, tables, raw TeX, and nested theorem/proof blocks. Headings and bibliography markers MUST remain module-level. A proof's `of` target SHALL be resolved explicitly, without inferring a relationship from adjacency.
 
-`math:` equations SHALL be numbered. The language SHALL also support unnumbered `$$` display equations, which carry no ID. A logical line whose structural content begins with `$$` SHALL open one, and a preceding paragraph running on the lines above SHALL end at that line. The equation MAY close on the same line (`$$ x $$`) or on a later line whose content ends with `$$`. The payload SHALL be the bytes between the delimiters, retaining line breaks and internal indentation after structural dedenting, and SHALL be validated as display math. Non-whitespace after the closing `$$` on its line, and an unterminated `$$`, MUST be rejected at a source location. `$$` equations SHALL be accepted exactly where `math:` equations are accepted, and diagnosed elsewhere. A line beginning with `\$` SHALL be prose starting with a literal dollar. Unnumbered equations SHALL be generated as `\[` … `\]` and SHALL NOT consume an equation number.
+`math:` equations SHALL be numbered. The language SHALL also support unnumbered `$$` display equations, which carry no ID. A logical line whose structural content begins with `$$` SHALL open one, and a preceding paragraph running on the lines above SHALL end at that line. The equation MAY close on the same line (`$$ x $$`) or on a later line whose content ends with `$$`. The payload SHALL be the bytes between the delimiters, retaining line breaks and internal indentation after structural dedenting, and SHALL be validated as display math. Non-whitespace after the closing `$$` on its line, and an unterminated `$$`, MUST be rejected at a source location. Because TeX ends display math at a paragraph break, a blank line between the delimiters MUST be rejected at that line, and an empty or whitespace-only payload MUST be rejected at the opening `$$`. `$$` equations SHALL be accepted exactly where `math:` equations are accepted, and diagnosed elsewhere. A line beginning with `\$` SHALL be prose starting with a literal dollar. Unnumbered equations SHALL be generated as `\[` … `\]` and SHALL NOT consume an equation number.
 
 #### Scenario: Theorem and proof from the authoring model
 - **WHEN** a titled theorem followed by a proof containing an identified display equation is parsed
@@ -64,6 +64,10 @@ The language SHALL support `math [id: name]:` display blocks; theorem, propositi
 - **GIVEN** a module with `math [id: eq-a]:`, then a `$$` equation, then `math [id: eq-b]:`, and a paragraph referencing both ids
 - **WHEN** the document is generated and compiled
 - **THEN** the `$$` payload is emitted between `\[` and `\]`, and the references render as equation numbers 1 and 2
+
+#### Scenario: Blank line or empty dollar display
+- **WHEN** a `$$` block has a blank line before or after its formula lines, or its payload is empty or whitespace-only (`$$ $$`, `$$$$`, or `$$` directly followed by `$$`)
+- **THEN** parsing fails at the blank line, or at the opening `$$` for an empty payload, and no LaTeX is generated
 
 #### Scenario: Malformed dollar display
 - **WHEN** a `$$` block reaches end of file without a closing `$$`, or text follows the closing `$$` on its line, or a `$$` equation appears inside a list item

@@ -50,7 +50,7 @@ A line whose content starts with `$$` at a position where a paragraph could star
 - single line: `$$ x^2 $$`;
 - multi-line: an opening line that starts with `$$`, then payload lines, then a line whose content ends with `$$`. Text after `$$` on the opening line and text before `$$` on the closing line belong to the payload.
 
-The payload keeps its line breaks and internal indentation after structural dedent, exactly as `parse_equation` does. The result is `TopBlock::Equation { id: None, numbered: false, payload, span }`. `$$` is accepted wherever the language already accepts equations (module scope and theorem/proof bodies), and diagnosed where it does not, such as inside list items, exactly like `math:`.
+The payload keeps its line breaks and internal indentation after structural dedent, as `parse_equation` does. Unlike `math:`, which ends at a dedent and drops trailing blank lines, a `$$` block is bounded by its delimiters, so a blank line can only fall inside the formula. TeX ends display math at a paragraph break, so a blank line inside the delimiters is a parse error at that line, and an empty or whitespace-only payload is a parse error at the opening `$$`. Without this check such a block passed validation and failed only in the engine, with no source location. `math:` still accepts a leading or interior blank line and fails the same way; fixing it touches `math:` and belongs to a separate change. The result is `TopBlock::Equation { id: None, numbered: false, payload, span }`. `$$` is accepted wherever the language already accepts equations (module scope and theorem/proof bodies), and diagnosed where it does not, such as inside list items, exactly like `math:`.
 
 `consume_paragraph` treats a line starting with `$$` as a paragraph terminator, the same way it already treats reserved words and list markers. Markdown-style writing therefore works: `where\n$$\nE = mc^2\n$$\nholds` produces paragraph, equation, paragraph.
 
@@ -73,6 +73,7 @@ In LaTeX and in Markdown, `$$` means an unnumbered display. Every `math:` block 
 ## Risks / Trade-offs
 
 - [Prose where two dollars satisfy the rule, e.g. `between $5 and 10$`, becomes math] $\rightarrow$ `5 and 10` contains no forbidden command, so it passes validation and silently renders as italic math. The author has to write `\$`. No `.trs` in the repository contains `$`.
+- [A `$` inside a link URL closes the `$` of an earlier price in the same paragraph: `Costs $5 [see](https://x.com/a$b)` becomes `\(5 [see](https://x.com/a\)b)`, and the link is lost with no diagnostic] $\rightarrow$ This is the rule's own consequence, and Pandoc 3.11 produces the same output byte for byte, so diverging would surprise Markdown authors. `docs/language.md` tells authors to write `\$` for the price.
 - [`$$` mid-line is an error where Pandoc would accept it] $\rightarrow$ The diagnostic names the fix (move `$$` to its own line). This is a deliberate price for byte preservation.
 - [A paragraph line that legitimately starts with `$$` as text, e.g. `$$ signs are...`] $\rightarrow$ It is parsed as display math and fails validation or termination with a located error. The author writes `\$$`, the same backslash escape that already turns a reserved start into literal prose.
 
