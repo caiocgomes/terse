@@ -1288,7 +1288,11 @@ fn parse_code_block<'a>(
             break;
         }
         let text = if line.is_blank {
-            &source[line.byte_start as usize..line.byte_end as usize]
+            // A whitespace-only line may be shorter than the prefix, or
+            // start with a tab; strip only the prefix spaces it has.
+            let raw = &source[line.byte_start as usize..line.byte_end as usize];
+            let lead = raw.bytes().take_while(|&b| b == b' ').count();
+            &raw[lead.min(strip)..]
         } else {
             &source[line.byte_start as usize + strip..line.byte_end as usize]
         };

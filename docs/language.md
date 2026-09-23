@@ -102,6 +102,7 @@ truncated artifact plan.
 
 `terse fmt` is lossless and semantic-preserving: it canonicalizes
 structural spacing/indentation and blank-line runs, but never rewraps
-prose, reorders metadata/citations, or touches opaque `math:`/`tex:`
-payload bytes. `fmt --check` never writes; `fmt` writes atomically per file
-and only after every selected file parses successfully.
+prose, reorders metadata/citations, or touches the bytes of an opaque
+payload (`math:`/`tex:` bodies, `$$` displays, and code blocks).
+`fmt --check` never writes; `fmt` writes atomically per file and only
+after every selected file parses successfully.

@@ -22,4 +22,4 @@ The style layer SHALL load `listings` and define a semantic `TerseCode` environm
 
 #### Scenario: Package set stays closed
 - **WHEN** the export profile's package list is compared with the style generator's emittable set
-- **THEN** both contain `listings`; the pinned toolchain closure covering `listings` is a separate maintainer step (a network-only re-derivation), not asserted by this scenario
+- **THEN** both contain `listings`, and the pinned toolchain closure derived from the full-paper fixture (which contains a code block) includes the `listings` package

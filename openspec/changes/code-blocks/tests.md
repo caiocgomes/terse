@@ -7,7 +7,7 @@ Tests use Rust `#[test]` through `cargo test`, placed as elsewhere in the reposi
 - **Formatter:** `crates/terse-core/src/syntax/format_tests.rs`.
 - **Profile guard:** `crates/terse-core/src/artifact/profile.rs` (existing `test_profile_packages_equal_emitted_set`).
 - **Real engine:** `crates/terse-cli/tests/e2e/latex_generation.rs`, `#[ignore]`d like its neighbors, run with `-- --ignored` against a local XeLaTeX.
-- **Pinned closure:** `crates/terse-cli/tests/e2e/toolchain.rs` (existing `test_pinned_closure_covers_full_paper_inputs`); this change does not add a code block to `full-paper` (that fixture is shared by too many unrelated real-PDF tests to carry a `listings` dependency, confirmed by breaking 16 of them), so this test's assertions are unaffected by code blocks either way.
+- **Pinned closure:** `crates/terse-cli/tests/e2e/toolchain.rs` (existing `test_pinned_closure_covers_full_paper_inputs`), which becomes meaningful once `full-paper` contains a code block.
 
 Four inherited scenarios keep their existing tests, re-run as the regression guard. The lexer change sits on every parse, so the full existing suite, including every `math:`/`tex:`/`$$` byte-preservation test, must stay green unchanged.
 
@@ -154,7 +154,7 @@ Every failure assertion checks the diagnostic code and that its span starts at t
 - **Test type**: e2e
 - **Test file**: `crates/terse-cli/tests/e2e/toolchain.rs`
 - **Test name**: `test_pinned_closure_covers_full_paper_inputs` (existing)
-- **Setup (GIVEN)**: `tests/fixtures/full-paper` as it already is (no code block added, see the design's note), and the re-derived closure
+- **Setup (GIVEN)**: `tests/fixtures/full-paper` containing a Python code block, and the re-derived closure
 - **Action (WHEN)**: compile the fixture with the recorder under the managed prefix
 - **Assert (THEN)**: every recorded input is owned by a closure package, including `listings.sty` and the Python language file
 

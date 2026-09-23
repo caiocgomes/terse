@@ -928,6 +928,29 @@ fn test_code_block_in_list_item() {
         other => panic!("expected list, got {other:?}"),
     }
 
+    // A whitespace-only content line in a nested block loses the block's
+    // structural prefix like any other content line (six spaces in the
+    // source, two of them the item's prefix, four kept); one shorter than
+    // the prefix has only prefix spaces, so it becomes empty.
+    let blank_lines = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "1. Install:\n",
+        "  ```bash\n",
+        "  a\n",
+        "      \n",
+        " \n",
+        "  b\n",
+        "  ```\n",
+    );
+    let module = parse_text(blank_lines.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::List { items, .. } => match &items[0].continuation[0].kind {
+            NodeKind::CodeBlock { code, .. } => assert_eq!(code, "a\n    \n\nb"),
+            other => panic!("expected code block, got {other:?}"),
+        },
+        other => panic!("expected list, got {other:?}"),
+    }
+
     // The same position holding `math:` still fails with the existing
     // list-item diagnostic.
     let math_in_item = concat!(
