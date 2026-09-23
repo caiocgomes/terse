@@ -7,3 +7,6 @@ managed-prefix*.tar.gz
 /dist
 .gitnexus
 .DS_Store
+
+# graphify knowledge-graph output (derived)
+graphify-out/

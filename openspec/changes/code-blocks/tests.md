@@ -66,7 +66,7 @@ Every failure assertion checks the diagnostic code and that its span starts at t
 - **Setup (GIVEN)**: (a) ```` ```python ```` then `x = 1` then EOF; (b) a block whose content line is `print("\end{TerseCode}")`; (c) the same with `\end {TerseCode}`
 - **Action (WHEN)**: `try_parse_diagnostics`
 - **Assert (THEN)**: each fails with `E-PARSE-002`; the span starts at the opener for (a) and at the content line for (b) and (c); messages name an unterminated block or the forbidden sequence
-- **Edge cases**: a content line `\end{lstlisting}` is accepted (harmless under `TerseCode`)
+- **Edge cases**: a content line `\end{lstlisting}` is accepted (harmless under `TerseCode`); under the recovery parse `check` uses (`parse_module_with_recovery`), an unterminated fence followed by ten code lines yields exactly one diagnostic, not one per line, and an unterminated `$$` likewise
 
 #### Scenario: Equivalent line endings (existing)
 - **Test type**: unit

@@ -47,6 +47,8 @@ A new module `crates/terse-core/src/syntax/opaque.rs` exposes one recognizer, us
 
 The existing consumers keep working unchanged: `parse_opaque_payload` still strips `indent * 2` from `byte_start`, and `parse_dollar_display` still slices from `byte_start + 2k`.
 
+`StructLine` gains `opaque: bool`, true for payload lines. `parse_module_with_recovery` resumes after an error at "the next line at zero indentation". At module scope every payload line of a fence or `$$` now has indent 0, so without the marker an unterminated fence would restart parsing on each code line and print one spurious diagnostic per line. `$$` already cascades this way today (seen in the `dollar-math-delimiters` verification). Recovery skips opaque lines when looking for its next boundary.
+
 *Alternative considered:* a separate pre-pass that marks opaque line ranges before a still context-free lexer. It is equivalent in behavior, but it adds a second walk and a second place that must agree on region ends. Rejected in favor of one pass using the shared recognizer.
 
 *Alternative considered:* keep the lexer strict and require payload lines to use only two-space multiples. Rejected: Makefile tabs and Python continuation lines aligned under a parenthesis are ordinary code.
@@ -77,7 +79,7 @@ The existing consumers keep working unchanged: `parse_opaque_payload` still stri
 
   This is the tested setting set. It uses no color and no size change (like `verbatim`), and long lines wrap instead of running into the margin.
 - **Body.** `\begin{TerseCode}[language=<Name>]`, the code bytes, then `\end{TerseCode}`. It is plain `\begin{TerseCode}` when the tag is absent or unknown.
-- **Language map.** Closed: a lower-cased tag → a `listings` name, containing only names present in `lstlang1/2/3.sty`. For example: `python`/`py` → `Python`, `r` → `R`, `sql` → `SQL`, `bash`/`sh`/`shell`/`zsh` → `bash`, `c` → `C`, `cpp`/`c++` → `C++`, `java` → `Java`, `matlab` → `Matlab`, `octave` → `Octave`, `html` → `HTML`, `xml` → `XML`, `go` → `Go`, `haskell` → `Haskell`, `ruby` → `Ruby`, `perl` → `Perl`, `php` → `PHP`, `scala` → `Scala`, `swift` → `Swift`, `lua` → `Lua`, `fortran` → `Fortran`, `tex`/`latex` → `TeX`, `make`/`makefile` → `make`. `listings` fails hard on an undefined language, so only map values reach LaTeX. The author's tag never does, which also closes an injection path through the option list.
+- **Language map.** Closed: a lower-cased tag → a `listings` name, containing only names present in `lstlang1/2/3.sty`. For example: `python`/`py` → `Python`, `r` → `R`, `sql` → `SQL`, `bash`/`sh`/`shell`/`zsh` → `bash`, `c` → `C`, `cpp`/`c++` → `C++`, `java` → `Java`, `matlab` → `Matlab`, `octave` → `Octave`, `html` → `HTML`, `xml` → `XML`, `go` → `Go`, `haskell` → `Haskell`, `ruby` → `Ruby`, `perl` → `Perl`, `php` → `PHP`, `scala` → `Scala`, `swift` → `Swift`, `lua` → `Lua`, `fortran` → `Fortran`, `tex`/`latex` → `TeX`, `make`/`makefile` → `make`. `listings` fails hard on an undefined language (tested: `[language=Rust]` stops the compile with "Couldn't load requested language"), so only map values reach LaTeX. The author's tag never does, which also closes an injection path through the option list.
 
 ### D5. Package closure
 

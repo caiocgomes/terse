@@ -1,0 +1,6 @@
+# Agent tooling copies (OpenSpec/GitNexus skills), not Terse content
+.claude/
+.cline/
+.clinerules/
+.codex/
+.gemini/

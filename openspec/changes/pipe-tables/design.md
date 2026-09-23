@@ -69,7 +69,7 @@ Outside protected spans, `\|` becomes a literal `|` and does not split. Inside a
 - **Column spec.** From `align`: `Default`/`Left` give `l`, `Center` gives `c`, `Right` gives `r`.
 - **Cells.** Header cells are `\TerseTableHeaderCell{<inlines>}` and body cells are rendered inlines, joined by ` & `, as today but through `render_inlines` instead of `escape_text`.
 - **Captioned table.** Unchanged float: `\begin{table}`, `\TerseFigureAlign`, the tabular, `\caption{<inlines>}`, the optional `\label`, `\end{table}`. It is numbered.
-- **Captionless table.** A new style environment, `\newenvironment{TerseTableHere}{\trivlist\TerseFigureAlign\item\relax}{\endtrivlist}`. That is LaTeX's own `center` definition with the theme's alignment in place of `\centering`, so the table appears where it is written, with list spacing, no float, no `\caption`, and no counter. Theme table padding, rules, and header styling apply to both forms, because they live in the style.
+- **Captionless table.** A new style environment, `\newenvironment{TerseTableHere}{\trivlist\TerseFigureAlign\item\relax}{\endtrivlist}`. That is LaTeX's own `center` definition with the theme's alignment in place of `\centering` (tested with a booktabs `tabular` under both `\centering` and `\raggedright`: no errors, table placed between the surrounding paragraphs, and only the captioned table numbered), so the table appears where it is written, with list spacing, no float, no `\caption`, and no counter. Theme table padding, rules, and header styling apply to both forms, because they live in the style.
 
 ### D7. Equation numbering sentence
 

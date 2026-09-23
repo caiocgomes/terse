@@ -4,7 +4,8 @@
 - [ ] 1.2 Assess the blast radius of `lex_lines`, `parse_opaque_payload`, `parse_dollar_display`, and `consume_paragraph` (GitNexus impact, falling back to grep for Rust symbols it cannot resolve) and report it.
 - [ ] 1.3 Add `syntax/opaque.rs` with the shared `opener` recognizer (`Indented` for exact `math:`/`math [..]:`/`tex:`, `Dollar`, `Fence { len }`) and use it from the block parser where `$$` and headers are detected today [tests: test_opaque_payload_lines_are_not_structural]
 - [ ] 1.4 Make `lex_lines` a single-pass state machine: payload lines get the region's fixed indent and bytes after the prefix, never touch the stack, and end by closer, shorter prefix, or EOF [tests: test_opaque_payload_lines_are_not_structural, test_invalid_structural_indentation, test_line_endings_preserve_semantics]
-- [ ] 1.5 Run the full existing suite unchanged (every `math:`/`tex:`/`$$` test) and confirm green
+- [ ] 1.5 Add `opaque: bool` to `StructLine`, and make `parse_module_with_recovery` skip opaque lines when searching for its next boundary [tests: test_malformed_code_blocks_fail]
+- [ ] 1.6 Run the full existing suite unchanged (every `math:`/`tex:`/`$$` test) and confirm green
 
 ## 2. Fenced code blocks in the syntax and model
 
