@@ -129,6 +129,7 @@ pub enum TopBlock {
     List(RawList),
     Equation {
         id: Option<String>,
+        numbered: bool,
         payload: String,
         span: SourceSpan,
     },
@@ -339,6 +340,21 @@ fn parse_block_sequence<'a>(
 
         if detect_list_marker(content).is_some() {
             let (block, next_i) = parse_list(lines, source, i, file_id, base)?;
+            blocks.push(block);
+            i = next_i;
+            continue;
+        }
+
+        if content.starts_with("$$") {
+            if context == BlockContext::ListItem {
+                return Err(malformed(
+                    file_id,
+                    base,
+                    line,
+                    "display math is not supported inside a list item",
+                ));
+            }
+            let (block, next_i) = parse_dollar_display(lines, source, i, file_id, base)?;
             blocks.push(block);
             i = next_i;
             continue;
@@ -622,6 +638,9 @@ fn consume_paragraph<'a>(
             break;
         }
         if detect_list_marker(content).is_some() {
+            break;
+        }
+        if content.starts_with("$$") {
             break;
         }
         if starts_with_reserved_word(content).is_some() {
@@ -1074,7 +1093,68 @@ fn parse_equation<'a>(
         header.byte_end
     };
     let span = mk_span(file_id, base, header.content_byte_start, end);
-    Ok((TopBlock::Equation { id, payload, span }, next_i))
+    Ok((TopBlock::Equation { id, numbered: true, payload, span }, next_i))
+}
+
+/// `$$ ... $$` display math: unnumbered, no attributes. Closes on the
+/// same line or on a later line containing `$$`; text between the
+/// delimiters is the payload, with line breaks and indentation beyond the
+/// block's own structural indent kept byte-for-byte, as `math:` does.
+fn parse_dollar_display<'a>(
+    lines: &[StructLine<'a>],
+    source: &str,
+    start: usize,
+    file_id: FileId,
+    base: u32,
+) -> Result<(TopBlock, usize), Diagnostic> {
+    let header = &lines[start];
+    let strip = (header.indent * 2) as usize;
+    let after = &header.content[2..];
+
+    if let Some(close) = after.find("$$") {
+        if !after[close + 2..].trim().is_empty() {
+            return Err(malformed(file_id, base, header, "unexpected text after the closing '$$'"));
+        }
+        let span = mk_span(file_id, base, header.content_byte_start, header.byte_end);
+        let payload = after[..close].to_string();
+        return Ok((TopBlock::Equation { id: None, numbered: false, payload, span }, start + 1));
+    }
+
+    let bytes = source.as_bytes();
+    let line_end = |l: &StructLine<'_>| if bytes.get(l.byte_end as usize) == Some(&b'\r') { "\r\n" } else { "\n" };
+    let mut parts: Vec<(&str, &str)> = Vec::new();
+    if !after.trim().is_empty() {
+        parts.push((after, line_end(header)));
+    }
+    let mut i = start + 1;
+    while i < lines.len() {
+        let line = &lines[i];
+        if !line.is_blank && line.indent < header.indent {
+            break;
+        }
+        let text = if line.is_blank { "" } else { &source[line.byte_start as usize + strip..line.byte_end as usize] };
+        if let Some(close) = text.find("$$") {
+            if !text[close + 2..].trim().is_empty() {
+                return Err(malformed(file_id, base, line, "unexpected text after the closing '$$'"));
+            }
+            let before = &text[..close];
+            if !before.trim().is_empty() {
+                parts.push((before, ""));
+            }
+            let mut payload = String::new();
+            for (idx, (t, eol)) in parts.iter().enumerate() {
+                payload.push_str(t);
+                if idx + 1 < parts.len() {
+                    payload.push_str(eol);
+                }
+            }
+            let span = mk_span(file_id, base, header.content_byte_start, line.byte_end);
+            return Ok((TopBlock::Equation { id: None, numbered: false, payload, span }, i + 1));
+        }
+        parts.push((text, line_end(line)));
+        i += 1;
+    }
+    Err(malformed(file_id, base, header, "unterminated display math: no closing '$$'"))
 }
 
 /// `tex:` raw block: an opaque payload with the same extraction rules as

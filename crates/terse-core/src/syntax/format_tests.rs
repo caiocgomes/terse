@@ -79,3 +79,15 @@ fn test_format_rejects_invalid_input_without_side_effects() {
         "rejected math (execution attempt) must fail to format, not silently pass through"
     );
 }
+
+#[test]
+fn test_format_preserves_dollar_math() {
+    let src = "# Title\n\nInline $x^2$ here.\n\n$$ E = mc^2 $$\n\n$$\na  +   b\n    c\n$$\n";
+    let once = String::from_utf8(format_source(&file(src)).expect("valid module")).unwrap();
+    assert!(once.contains("Inline $x^2$ here."), "{once}");
+    assert!(once.contains("$$ E = mc^2 $$"), "{once}");
+    assert!(once.contains("$$\na  +   b\n    c\n$$"), "{once}");
+    assert!(!once.contains("\\(") && !once.contains("math:"), "{once}");
+    let twice = String::from_utf8(format_source(&file(&once)).expect("valid module")).unwrap();
+    assert_eq!(once, twice);
+}

@@ -150,6 +150,23 @@ impl Parser {
                         _ => return Err(InlineError("unknown backslash escape".to_string())),
                     }
                 }
+                '$' if self.peek_at(self.pos + 1) == Some('$') => {
+                    return Err(InlineError(
+                        "display math '$$' must start its own line".to_string(),
+                    ));
+                }
+                '$' => match self.find_dollar_closer() {
+                    Some(close) => {
+                        Self::flush(&mut buf, &mut out);
+                        let content: String = self.chars[self.pos + 1..close].iter().collect();
+                        out.push(Inline::Math(content));
+                        self.pos = close + 1;
+                    }
+                    None => {
+                        buf.push('$');
+                        self.pos += 1;
+                    }
+                },
                 '`' => {
                     Self::flush(&mut buf, &mut out);
                     self.parse_code(&mut out)?;
@@ -295,6 +312,32 @@ impl Parser {
             }
             self.pos += 1;
         }
+    }
+
+    /// Pandoc's rule for `$...$`: the opener at `self.pos` must be followed
+    /// by a non-space, and the closer must follow a non-space and must not
+    /// precede a digit. Only the next unescaped `$` is a candidate closer
+    /// (TeX forbids a bare `$` inside inline math), so a price before real
+    /// math never pairs with it. Returns the closer's index, or `None` when
+    /// the `$` is literal text (a price, a lone sign).
+    fn find_dollar_closer(&self) -> Option<usize> {
+        match self.peek_at(self.pos + 1) {
+            Some(c) if !c.is_whitespace() => {}
+            _ => return None,
+        }
+        let mut i = self.pos + 1;
+        while i < self.chars.len() {
+            match self.chars[i] {
+                '\\' => i += 2,
+                '$' => {
+                    let prev = self.chars[i - 1];
+                    let next_is_digit = matches!(self.peek_at(i + 1), Some(c) if c.is_ascii_digit());
+                    return (!prev.is_whitespace() && !next_is_digit).then_some(i);
+                }
+                _ => i += 1,
+            }
+        }
+        None
     }
 
     fn parse_footnote(&mut self, out: &mut Vec<Inline>) -> Result<(), InlineError> {
@@ -591,5 +634,82 @@ mod tests {
                 Inline::CrossRef("eq-main".to_string()),
             ]
         );
+    }
+
+    fn has_math(out: &[Inline]) -> bool {
+        out.iter().any(|i| matches!(i, Inline::Math(_)))
+    }
+
+    #[test]
+    fn test_dollar_inline_math_equals_paren_math() {
+        let dollar = parse_inline(r"x $\frac{a}{b}$ y").unwrap();
+        let paren = parse_inline(r"x \(\frac{a}{b}\) y").unwrap();
+        assert_eq!(
+            dollar,
+            vec![
+                Inline::Text("x ".to_string()),
+                Inline::Math(r"\frac{a}{b}".to_string()),
+                Inline::Text(" y".to_string()),
+            ]
+        );
+        assert_eq!(dollar, paren);
+
+        assert_eq!(parse_inline("$x$").unwrap(), vec![Inline::Math("x".to_string())]);
+        assert_eq!(
+            parse_inline("$a$ and $b$").unwrap(),
+            vec![
+                Inline::Math("a".to_string()),
+                Inline::Text(" and ".to_string()),
+                Inline::Math("b".to_string()),
+            ]
+        );
+        assert_eq!(
+            parse_inline("($a$).").unwrap(),
+            vec![
+                Inline::Text("(".to_string()),
+                Inline::Math("a".to_string()),
+                Inline::Text(").".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_currency_dollars_stay_text() {
+        for input in ["It costs $5 to $10 per unit.", "Pay $ 5 now.", "A lone $ sign.", "$5$10", "a$b"] {
+            let out = parse_inline(input).unwrap();
+            assert!(!has_math(&out), "{input:?} parsed as math: {out:?}");
+            assert_eq!(plain_text(&out), input);
+        }
+        // Prices before real math must not pair with it: only the next
+        // unescaped `$` may close an opener.
+        let out = parse_inline("costs $5 to $10, inline $y^2$.").unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Inline::Text("costs $5 to $10, inline ".to_string()),
+                Inline::Math("y^2".to_string()),
+                Inline::Text(".".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escaped_dollars() {
+        assert_eq!(parse_inline(r"price \$5").unwrap(), vec![Inline::Text("price $5".to_string())]);
+        let out = parse_inline(r"math $a \$ b$ here").unwrap();
+        assert!(out.contains(&Inline::Math(r"a \$ b".to_string())), "{out:?}");
+        let out = parse_inline(r"\$5 and $x$").unwrap();
+        assert_eq!(
+            out,
+            vec![Inline::Text("$5 and ".to_string()), Inline::Math("x".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_midline_display_dollars_rejected() {
+        let err = parse_inline("where $$x$$ holds").unwrap_err();
+        assert!(err.0.contains("own line"), "{err:?}");
+        let out = parse_inline(r"\$$x").unwrap();
+        assert_eq!(out, vec![Inline::Text("$$x".to_string())]);
     }
 }

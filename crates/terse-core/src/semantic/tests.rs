@@ -194,7 +194,7 @@ fn test_all_mvp_nodes_are_typed() {
     // Only math/raw nodes carry TeX payload bytes; everything else is
     // typed structured data (spot-check the equation).
     match &module.blocks[4].kind {
-        NodeKind::Equation { id, payload } => {
+        NodeKind::Equation { id, payload, .. } => {
             assert_eq!(id.as_deref(), Some("eq-main"));
             assert!(payload.contains("E = m c^2"));
         }
@@ -414,4 +414,24 @@ fn test_projection_retains_effective_bibliography() {
 
     assert_ne!(proj_a, proj_b, "differing effective bibliography must project differently");
     assert_ne!(digest_a, digest_b, "differing effective bibliography must digest differently");
+}
+
+#[test]
+fn test_projection_distinguishes_numbered_equations() {
+    let project_src = |text: &str| {
+        let file = SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec()).expect("valid source");
+        let (_, plan) = compile(&InputSnapshot::single(file));
+        let p = plan.expect("plan");
+        crate::semantic::projection::project(&p.module, &p.bindings.authorized)
+    };
+    let numbered = project_src("document:\n  title: \"T\"\n\nmath:\n  x = y\n");
+    let unnumbered = project_src("document:\n  title: \"T\"\n\n$$\nx = y\n$$\n");
+    assert_ne!(numbered, unnumbered);
+    assert_ne!(
+        crate::semantic::projection::digest(&numbered),
+        crate::semantic::projection::digest(&unnumbered)
+    );
+    let eqs = |p: &crate::semantic::projection::Projection| format!("{p:?}");
+    assert!(eqs(&numbered).contains("numbered: true, payload: \"x = y\""), "{}", eqs(&numbered));
+    assert!(eqs(&unnumbered).contains("numbered: false, payload: \"x = y\""), "{}", eqs(&unnumbered));
 }

@@ -45,7 +45,7 @@ pub enum ProjectedNode {
     Heading { level: u8, id: Option<String>, inlines: Vec<Inline> },
     Paragraph { inlines: Vec<Inline> },
     List { ordered: bool, start: Option<u32>, items: Vec<ProjectedListItem> },
-    Equation { id: Option<String>, payload: String },
+    Equation { id: Option<String>, numbered: bool, payload: String },
     Figure { path: String, id: Option<String>, role: Option<String>, caption: Vec<Inline>, alt: String },
     Table { id: Option<String>, caption: String, header: Vec<String>, rows: Vec<Vec<String>> },
     TheoremLike { kind: crate::semantic::TheoremKind, title: Option<String>, id: Option<String>, body: Vec<ProjectedNode> },
@@ -85,8 +85,8 @@ fn project_node(node: &Node) -> ProjectedNode {
             start: *start,
             items: items.iter().map(project_list_item).collect(),
         },
-        NodeKind::Equation { id, payload } => {
-            ProjectedNode::Equation { id: id.clone(), payload: payload.clone() }
+        NodeKind::Equation { id, numbered, payload } => {
+            ProjectedNode::Equation { id: id.clone(), numbered: *numbered, payload: payload.clone() }
         }
         NodeKind::Figure { path, id, role, caption, alt } => ProjectedNode::Figure {
             path: path.clone(),

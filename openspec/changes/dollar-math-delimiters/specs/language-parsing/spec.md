@@ -3,7 +3,7 @@
 ### Requirement: Readable paragraphs and inline elements
 The parser SHALL support paragraphs, `*emphasis*`, `**strong**`, links `[label](destination)`, backtick-delimited inline code, `^[footnote]`, `\(math\)`, `$math$`, and `{ref: id}`. Paragraph source newlines SHALL mean one semantic space without forcing source reflow. Inline delimiters MUST balance without crossing. Code delimiters SHALL close with a matching backtick-run length; code and inline math MUST stay on one logical line. Nested footnotes, nested links, footnotes in link labels, and unsupported unescaped triple-asterisk runs MUST be rejected. Word-internal asterisks SHALL remain text. Unknown prose backslash escapes MUST fail; escaped punctuation SHALL remain literal. Link destinations SHALL allow balanced/escaped parentheses and reject unescaped whitespace.
 
-`$math$` SHALL produce the same inline math element as `\(math\)`, with the same validation and the same generated LaTeX. An unescaped `$` SHALL open inline math only when it is not immediately followed by another `$` or by whitespace and a closing `$` exists later in the same paragraph. The closing `$` MUST NOT be escaped, MUST NOT be preceded by whitespace, and MUST NOT be followed by an ASCII digit. An escaped `\$` inside the math SHALL NOT close it. A `$` that does not satisfy these conditions SHALL remain literal text. A `$$` that does not begin a logical line MUST be rejected with guidance to place display math on its own line.
+`$math$` SHALL produce the same inline math element as `\(math\)`, with the same validation and the same generated LaTeX. An unescaped `$` SHALL open inline math only when it is not immediately followed by another `$` or by whitespace, and the next unescaped `$` in the same paragraph can close it. That next `$` closes only if it is not preceded by whitespace and not followed by an ASCII digit; otherwise the opener is literal text. A `$` further along never closes an earlier opener. An escaped `\$` inside the math SHALL NOT close it. A `$` that does not satisfy these conditions SHALL remain literal text. A `$$` that does not begin a logical line MUST be rejected with guidance to place display math on its own line.
 
 #### Scenario: Mixed inline content
 - **WHEN** a wrapped paragraph containing emphasis, strong text, a link, literal code, a footnote, math, and a cross-reference is parsed
@@ -21,6 +21,10 @@ The parser SHALL support paragraphs, `*emphasis*`, `**strong**`, links `[label](
 #### Scenario: Currency stays text
 - **WHEN** a paragraph reads `It costs $5 to $10 per unit.`, or `Pay $ 5 now.`, or contains a single `$`
 - **THEN** it contains no inline math and every `$` is literal text, emitted as `\$`
+
+#### Scenario: Prices before math do not pair with it
+- **WHEN** a paragraph reads `costs $5 to $10, inline $y^2$.`
+- **THEN** its only inline math is `y^2`, and `$5` and `$10` are literal text
 
 #### Scenario: Escaped dollars
 - **WHEN** a paragraph contains `\$5` or the math `$a \$ b$`

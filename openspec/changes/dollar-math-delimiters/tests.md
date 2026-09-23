@@ -11,7 +11,7 @@ Rust `#[test]` via `cargo test`, following the existing layout:
 
 Four scenarios in the modified requirements already exist and keep their current tests. They are re-run unchanged as the regression guard for the `\(...\)` and `math:` paths.
 
-Every failure-path assertion checks two things: that the call errors, and that the error span points at the offending `$` or `$$` byte offset, not at the start of the paragraph.
+Block-level failures (`$$` blocks) must carry a span that points at the offending line. Inline failures carry the paragraph span with `E-PARSE-050`, because `InlineError` has no position (`crates/terse-core/src/semantic/mod.rs:799`). That is the existing behavior for every inline error and is not changed here.
 
 ## Spec-to-Test Mapping
 
@@ -58,7 +58,7 @@ Every failure-path assertion checks two things: that the call errors, and that t
 - **Setup (GIVEN)**: `It costs $5 to $10 per unit.`, `Pay $ 5 now.`, `A lone $ sign.`
 - **Action (WHEN)**: `parse_inline` on each
 - **Assert (THEN)**: no `Inline::Math` in any result; the concatenated text equals the input
-- **Edge cases**: `$5$10` (closer followed by a digit, so there is no math); `a$b` with no partner
+- **Edge cases**: `$5$10` (closer followed by a digit, so there is no math); `a$b` with no partner; `costs $5 to $10, inline $y^2$.` yields only `Math("y^2")` (scenario "Prices before math do not pair with it")
 
 - **Test type**: unit
 - **Test file**: `crates/terse-core/src/latex/mod.rs`
@@ -176,6 +176,7 @@ Every failure-path assertion checks two things: that the call errors, and that t
 | language-parsing | Ambiguous delimiters are rejected | `syntax/tests.rs`, `syntax/inlines.rs` | `test_crossing_and_nested_delimiters_fail`, `test_crossing_delimiters_fail`, `test_triple_asterisk_rejected` | unit |
 | language-parsing | Dollar inline math matches backslash-paren math | `syntax/inlines.rs`, `latex/mod.rs` | `test_dollar_inline_math_equals_paren_math`, `test_dollar_inline_math_generates_like_paren_math` | unit |
 | language-parsing | Currency stays text | `syntax/inlines.rs`, `latex/mod.rs` | `test_currency_dollars_stay_text`, `test_currency_dollars_are_escaped_in_output` | unit |
+| language-parsing | Prices before math do not pair with it | `syntax/inlines.rs` | `test_currency_dollars_stay_text` | unit |
 | language-parsing | Escaped dollars | `syntax/inlines.rs` | `test_escaped_dollars` | unit |
 | language-parsing | Dollar math is validated | `syntax/tests.rs` | `test_dollar_math_rejects_execution` | unit |
 | language-parsing | Mid-line display dollars are rejected | `syntax/inlines.rs` | `test_midline_display_dollars_rejected` | unit |

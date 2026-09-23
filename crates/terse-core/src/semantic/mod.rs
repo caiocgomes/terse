@@ -97,8 +97,10 @@ pub enum NodeKind {
     },
     /// A display equation. The payload is emitted unchanged; validation
     /// against the closed TeX math subset is added in task group 8.
+    /// `math:` blocks are numbered; `$$` displays are not.
     Equation {
         id: Option<String>,
+        numbered: bool,
         payload: String,
     },
     Figure {
@@ -687,10 +689,10 @@ fn lower_block(block: TopBlock) -> Result<Node, Diagnostic> {
                 span,
             })
         }
-        TopBlock::Equation { id, payload, span } => {
+        TopBlock::Equation { id, numbered, payload, span } => {
             crate::syntax::math::validate(&payload).map_err(|e| math_error_to_diagnostic(e, span))?;
             Ok(Node {
-                kind: NodeKind::Equation { id, payload },
+                kind: NodeKind::Equation { id, numbered, payload },
                 span,
             })
         }

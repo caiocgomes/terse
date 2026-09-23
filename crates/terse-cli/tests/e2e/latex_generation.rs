@@ -266,3 +266,34 @@ fn test_raw_tex_undefined_reference_fails_against_real_engine() {
         "no PDF is published for a document whose references never resolve"
     );
 }
+
+#[test]
+#[ignore = "requires a local XeLaTeX distribution"]
+fn test_dollar_display_does_not_consume_equation_number() {
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir("dollar-display-numbering");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        concat!(
+            "document:\n  title: \"Numbering\"\n\n",
+            "math [id: eq-a]:\n  a = 1\n\n",
+            "$$ x = 0 $$\n\n",
+            "math [id: eq-b]:\n  b = 2\n\n",
+            "See REFA{ref: eq-a} and REFB{ref: eq-b}.\n",
+        ),
+    )
+    .unwrap();
+
+    let code = terse_cli::run(["terse", "build", "--require-pdf", "--theme", "academic"], &tmp);
+    assert_eq!(code, 0);
+    let text = crate::common::pdf::extract_text(&tmp.join("build/academic/paper.pdf"));
+    assert!(text.contains("REFA1"), "eq-a must be number 1:\n{text}");
+    assert!(text.contains("REFB2"), "eq-b must be number 2, not 3:\n{text}");
+    assert!(!text.contains("(3)"), "the $$ display must not be numbered:\n{text}");
+}

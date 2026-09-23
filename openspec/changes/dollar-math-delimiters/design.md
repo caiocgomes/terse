@@ -35,9 +35,9 @@ In the inline loop, a `$` becomes a math opener when all of the following hold:
 - it is not preceded by `\`;
 - it is not immediately followed by another `$`;
 - the next character is not whitespace;
-- a closing `$` exists later in the same paragraph text, where the closer is not preceded by whitespace, not preceded by `\`, and not followed by an ASCII digit.
+- the next unescaped `$` in the paragraph text can close it: it is not preceded by whitespace and not followed by an ASCII digit.
 
-If all of that holds, the content between the two dollars becomes `Inline::Math` and follows the same path as `\(...\)`. If no valid closer exists, the `$` is pushed as literal text, which keeps today's behavior (escaped to `\$` on output). During the scan for a closer, `\$` inside the formula is skipped, so `$a \$ b$` works.
+Only the next unescaped `$` is a candidate. A later one never closes an earlier opener. TeX itself forbids a bare `$` inside inline math, and a wider search pairs a price with the next real formula: `costs $5 to $10, inline $y^2$` would become one math span from `5` to `y^2`. That bug was caught while building a real PDF during implementation. If all of that holds, the content between the two dollars becomes `Inline::Math` and follows the same path as `\(...\)`. If the candidate does not qualify, the `$` is pushed as literal text, which keeps today's behavior (escaped to `\$` on output). During the scan for a closer, `\$` inside the formula is skipped, so `$a \$ b$` works.
 
 *Alternative considered:* any `$` opens math, and literal dollars must be `\$`. Rejected because it breaks every sentence that contains a price, and it is not what "standard" means for anyone coming from Pandoc or Markdown.
 

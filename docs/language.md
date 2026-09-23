@@ -30,6 +30,16 @@ diagnostic error — metadata placement is checked, not inferred.
   syntax/math.rs`. Execution primitives (`\input`, `\write18`, `\csname`,
   `\def`, `^^` byte encoding, etc.) are rejected at parse time, not at
   compile time.
+- Dollar math, validated the same way. Inline `$...$` is equivalent to
+  `\(...\)`. A `$` opens math only when the next character is not a
+  space, and it closes at the next unescaped `$`, provided that one does
+  not follow a space and is not followed by a digit. Otherwise the `$` is
+  literal text, so `It costs $5 to $10` stays prose; write `\$` to force
+  a literal dollar. Display `$$ ... $$` must start its own line; it may
+  close on the same line or on a later one, and it ends a paragraph
+  running above it. `$$` equations are unnumbered (`\[...\]`) and take no
+  id. Use `math [id: ...]:` when an equation needs a number or a
+  `{ref: ...}`.
 - Explicit raw TeX (`tex:` blocks) for anything outside the restricted
   subset. Raw blocks always emit `W-TEX-001`; `check --deny-warnings`
   turns that into a build failure. Declared support files/packages (e.g.

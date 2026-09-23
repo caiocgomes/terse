@@ -504,8 +504,9 @@ fn test_theorem_proof_equation_structure() {
             assert_eq!(of.as_deref(), Some("transfer"));
             assert_eq!(body.len(), 2);
             match &body[1].kind {
-                NodeKind::Equation { id, payload } => {
+                NodeKind::Equation { id, numbered, payload } => {
                     assert_eq!(id.as_deref(), Some("transfer-eq"));
+                    assert!(*numbered, "math: equations are numbered");
                     assert!(payload.contains("\\dot V"));
                 }
                 other => panic!("expected equation, got {other:?}"),
@@ -699,7 +700,7 @@ fn test_tex_math_bytes_are_preserved() {
     );
     let module = parse_text(display.as_bytes());
     match &module.blocks[0].kind {
-        NodeKind::Equation { id, payload } => {
+        NodeKind::Equation { id, payload, .. } => {
             assert_eq!(id.as_deref(), Some("eq1"));
             assert_eq!(
                 payload,
@@ -821,4 +822,87 @@ fn test_raw_payload_trivia_is_opaque() {
         }
         other => panic!("expected raw tex, got {other:?}"),
     }
+}
+
+#[test]
+fn test_dollar_math_rejects_execution() {
+    let pairs = [
+        (r"$\input{evil}$", r"\(\input{evil}\)"),
+        (r"$\write18{x}$", r"\(\write18{x}\)"),
+        (r"$\frac{\csname x\endcsname}{2}$", r"\(\frac{\csname x\endcsname}{2}\)"),
+    ];
+    for (dollar, paren) in pairs {
+        let dollar_src = format!("document:\n  title: \"T\"\n\nUnsafe: {dollar}\n");
+        let paren_src = format!("document:\n  title: \"T\"\n\nUnsafe: {paren}\n");
+        let dollar_err = try_parse_diagnostics(dollar_src.as_bytes()).expect_err(dollar);
+        let paren_err = try_parse_diagnostics(paren_src.as_bytes()).expect_err(paren);
+        assert_eq!(dollar_err.code, paren_err.code, "{dollar}");
+    }
+}
+
+fn equation_parts(node: &crate::semantic::Node) -> (Option<&str>, bool, &str) {
+    match &node.kind {
+        NodeKind::Equation { id, numbered, payload } => (id.as_deref(), *numbered, payload.as_str()),
+        other => panic!("expected equation, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_multiline_dollar_display_splits_paragraph() {
+    let src = "document:\n  title: \"T\"\n\nwhere\n$$\na = b +\n  c\n$$\nholds.\n";
+    let module = parse_text(src.as_bytes());
+    assert_eq!(module.blocks.len(), 3, "{:?}", module.blocks);
+    assert_eq!(node_text(&module.blocks[0]), "where");
+    assert_eq!(equation_parts(&module.blocks[1]), (None, false, "a = b +\n  c"));
+    assert_eq!(node_text(&module.blocks[2]), "holds.");
+
+    // CRLF inside the payload survives.
+    let crlf = "document:\r\n  title: \"T\"\r\n\r\n$$\r\na = b +\r\n  c\r\n$$\r\n";
+    let module = parse_text(crlf.as_bytes());
+    assert_eq!(equation_parts(&module.blocks[0]), (None, false, "a = b +\r\n  c"));
+
+    // Accepted inside a theorem body, nested under it.
+    let thm = "document:\n  title: \"T\"\n\ntheorem:\n  Claim.\n  $$\n  x = y\n  $$\n";
+    let module = parse_text(thm.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::TheoremLike { body, .. } => {
+            assert_eq!(body.len(), 2);
+            assert_eq!(equation_parts(&body[1]), (None, false, "x = y"));
+        }
+        other => panic!("expected theorem, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_single_line_dollar_display() {
+    let src = "document:\n  title: \"T\"\n\n$$ E = mc^2 $$\n";
+    let module = parse_text(src.as_bytes());
+    assert_eq!(module.blocks.len(), 1);
+    assert_eq!(equation_parts(&module.blocks[0]), (None, false, " E = mc^2 "));
+
+    let split = "document:\n  title: \"T\"\n\n$$ a = b +\nc $$\n";
+    let module = parse_text(split.as_bytes());
+    assert_eq!(equation_parts(&module.blocks[0]), (None, false, " a = b +\nc "));
+}
+
+#[test]
+fn test_malformed_dollar_display_fails() {
+    let head = "document:\n  title: \"T\"\n\n";
+    let cases = [
+        (format!("{head}$$\nx\n"), "$$", "unterminated"),
+        (format!("{head}$$ x $$ trailing\n"), "$$ x $$ trailing", "after"),
+        (format!("{head}- item\n  $$ x $$\n"), "$$ x $$", "list item"),
+    ];
+    for (src, at, needle) in cases {
+        let err = try_parse_diagnostics(src.as_bytes()).expect_err(&src);
+        assert!(err.message.contains(needle), "{src:?}: {}", err.message);
+        let span = err.primary.expect("located");
+        let start = src.rfind(at).expect("marker present") as u32;
+        assert_eq!(span.byte_start, start, "{src:?}: span {span:?}");
+    }
+
+    // An escaped leading dollar is prose.
+    let escaped = format!("{head}\\$$ signs are fine\n");
+    let module = parse_text(escaped.as_bytes());
+    assert_eq!(node_text(&module.blocks[0]), "$$ signs are fine");
 }

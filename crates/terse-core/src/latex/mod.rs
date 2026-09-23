@@ -85,7 +85,12 @@ fn render_node(node: &Node, symbols: &SymbolTable, out: &mut String) {
             out.push_str("\n\n");
         }
         NodeKind::List { ordered, start, items } => render_list(*ordered, *start, items, symbols, out),
-        NodeKind::Equation { id, payload } => {
+        NodeKind::Equation { numbered: false, payload, .. } => {
+            out.push_str("\\[\n");
+            out.push_str(payload);
+            out.push_str("\n\\]\n");
+        }
+        NodeKind::Equation { id, payload, .. } => {
             out.push_str("\\begin{TerseEquation}");
             if let Some(id) = id {
                 out.push_str(&format!("\\label{{{id}}}"));
@@ -902,6 +907,51 @@ mod tests {
 
     fn span() -> SourceSpan {
         SourceSpan::new(FileId(0), 0, 0)
+    }
+
+    /// Runs the real front end (lex, block parse, lower) so generation
+    /// tests can start from `.trs` text rather than hand-built nodes.
+    fn parse_src(text: &str) -> ParsedModule {
+        let file = crate::source::SourceFile::new(FileId(0), "entry.trs", text.as_bytes().to_vec()).unwrap();
+        let lines = crate::syntax::lexer::lex_lines(file.text()).unwrap();
+        let blocks = crate::syntax::blocks::parse_module(&lines, file.text(), file.id, file.base_offset()).unwrap();
+        crate::semantic::lower(blocks, file.id).unwrap()
+    }
+
+    fn body_of(text: &str) -> String {
+        let out = generate_document(&parse_src(text), &theme::academic());
+        let start = out.find("\\begin{document}").expect("document begins");
+        out[start..].to_string()
+    }
+
+    #[test]
+    fn test_dollar_inline_math_generates_like_paren_math() {
+        let dollar = body_of("document:\n  title: \"T\"\n\nSo $\\frac{a}{b}$ holds.\n");
+        let paren = body_of("document:\n  title: \"T\"\n\nSo \\(\\frac{a}{b}\\) holds.\n");
+        assert_eq!(dollar, paren);
+        assert!(dollar.contains("\\frac{a}{b}"));
+    }
+
+    #[test]
+    fn test_unnumbered_dollar_display_emits_brackets() {
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "math [id: eq-a]:\n  a = 1\n\n",
+            "$$ x $$\n\n",
+            "math [id: eq-b]:\n  b = 2\n",
+        ));
+        let a = body.find("\\label{eq-a}").expect("eq-a");
+        let x = body.find("\\[\n x \n\\]\n").expect("bracketed $$ display");
+        let b = body.find("\\label{eq-b}").expect("eq-b");
+        assert!(a < x && x < b, "{body}");
+        assert_eq!(body.matches("\\begin{TerseEquation}").count(), 2, "{body}");
+    }
+
+    #[test]
+    fn test_currency_dollars_are_escaped_in_output() {
+        let body = body_of("document:\n  title: \"T\"\n\nIt costs $5 to $10 per unit.\n");
+        assert!(body.contains("It costs \\$5 to \\$10 per unit."), "{body}");
+        assert!(!body.contains("\\("), "{body}");
     }
 
     #[test]
