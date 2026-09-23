@@ -15,11 +15,25 @@ export-profile = "texlive-2025-xelatex"
 # Frozen end-of-series repository for TeX Live 2025. `install-tl` from the
 # main mirrors installs the CURRENT year (2026 at the time of pinning), which
 # is exactly the unattended upgrade this profile exists to avoid. The list is
-# ordered; the installer tries each mirror in turn. Mirrors are added only
-# after verifying their TLS certificate and byte-identical containers
-# (ftp.tug.org failed hostname verification on 2026-09-20 and is excluded).
+# ordered; `terse toolchain install`/`update` tries each mirror in turn,
+# falling through to the next on failure (`crates/terse-cli/src/toolchain/
+# install.rs`). Mirrors are added only after verifying their TLS certificate.
+# Verification tiers, from strongest to weakest, and which one each entry
+# actually got: byte-identical containers against ftp.math.utah.edu (the
+# original pin, 2026-09-20); when that reference is itself unreachable
+# (timed out from this network on 2026-09-23, though the network otherwise
+# has a route out), the pinned installer's published SHA-512, which covers
+# only the installer archive itself (ftp.tu-chemnitz.de, added 2026-09-23
+# on this weaker tier). `install-tl`'s own bootstrap reported this
+# repository `(verified)`, but the later `tlmgr install` of the actual
+# package set reported it `(not verified: valid signature with expired
+# key)` -- so past the installer archive, this mirror is trusted on the
+# SHA-512 pin alone, not on a currently-valid GPG chain. Re-verify against
+# Utah byte-for-byte once it is reachable again. ftp.tug.org failed
+# hostname verification on 2026-09-20 and is excluded.
 repositories = [
     "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final/",
+    "https://ftp.tu-chemnitz.de/pub/tug/historic/systems/texlive/2025/tlnet-final/",
 ]
 
 # The repository's own installer (the last one of the 2025 series, frozen
@@ -27,9 +41,15 @@ repositories = [
 # "TeX Live version 2025"). The SHA-512 is the value PUBLISHED next to the
 # archive as `install-tl-unx.tar.gz.sha512` (GPG-signed as `.sha512.asc`),
 # verified against a fresh download on 2026-09-20. Terse verifies this
-# digest before executing anything from the archive.
+# digest before executing anything from the archive, so this URL only
+# needs to serve the byte-identical file, not to be independently trusted.
+# Unlike `repositories` above, this single URL has no fallback (the
+# archive is downloaded once, before the `-repository` loop ever runs) --
+# points at ftp.tu-chemnitz.de, not ftp.math.utah.edu, since Utah timed
+# out from this network on 2026-09-23 (see `repositories`' comment); the
+# downloaded bytes hash identically to the original Utah-sourced pin.
 [install-tl.unix]
-url = "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final/install-tl-unx.tar.gz"
+url = "https://ftp.tu-chemnitz.de/pub/tug/historic/systems/texlive/2025/tlnet-final/install-tl-unx.tar.gz"
 sha512 = "a307d7d11bcbd1f054ad0b0d476f7f12bc1a40d07445020edef8713b44453831d18a2f1722c3d2b0ea2e4fe6c06183a79d1c4049495113f412a9f5a570a8614d"
 
 # Package closure installed with `tlmgr install` after `scheme-infraonly`.
