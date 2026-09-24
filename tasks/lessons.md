@@ -57,3 +57,13 @@
 **Regra abstrata.** Comportamento do código não é prova do que a spec exige; quando o requisito que estou escrevendo descreve algo que outro capability também governa (numeração, escape, ordem, IDs), procurar esse termo em todas as `openspec/specs/*/spec.md` antes de escrever, e tratar divergência código vs spec antiga como decisão do autor, não como fato a codificar.
 
 **Como aplicar.** Antes de fechar um delta spec: `grep -n -i '<conceito>' openspec/specs/*/spec.md` para cada comportamento que a delta afirma (ex.: "numbered", "caption", "escape"). Se a spec antiga diz outra coisa que o código, listar como pergunta ao autor no proposal/design, com as duas leituras.
+
+## 2026-09-24 — Desenhar a entrada Markdown sem perguntar qual é a relação entre os dois formatos
+
+**Erro concreto.** Na proposal da `compile-markdown` tratei o `.md` como um formato estrangeiro com alcance próprio. Criei quatro nós novos (citação de bloco, linha horizontal, headings 4-5, quebra de linha) "alcançáveis só pelo `.md`" e pus a sintaxe `.trs` deles como non-goal. Com isso o md ficou maior que o Terse em alguns pontos. Também enquadrei a escolha do autor como "público: papers vs Markdown genérico", quando a pergunta real era outra.
+
+**Correção do autor (literal).** "na minha cabeça, o markdown não deveria ser uma markup language específica. Originalmente, meu sonho com markdown eh que fosse uma maneira mais simples de fazer Tex. O terse e isso ao extremo. Mas pra ele ser funcional, ele precisa tb ser capaz de compilar qualquer texto em md. Nesse caso, o md seria um terse restrito. Mas ambos compilam em Tex nesse futuro"
+
+**Regra abstrata.** Quando uma change acrescenta um segundo formato de entrada para o mesmo destino, a primeira pergunta é a relação entre os formatos (subconjunto, superconjunto, pares), derivada da visão do autor. Público e lista de construções vêm depois. Qualquer assimetria (algo expressável num formato e não no outro) precisa ser conferida contra essa relação antes de virar non-goal.
+
+**Como aplicar.** Antes de escrever proposal de front end novo: escrever em uma frase a relação entre o formato novo e o existente, e confirmar com o autor. Depois, varrer a proposal procurando "só pelo X", "non-goal: sintaxe Y em Z" e toda construção mapeada para algo que o outro formato não expressa; cada uma dessas é violação candidata da relação.
