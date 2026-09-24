@@ -647,9 +647,25 @@ fn test_missing_figure_fields_and_ragged_tables() {
     assert!(try_parse_text(footnote_caption.as_bytes()).is_err());
 }
 
+/// Asserts that `err` points at the first byte of `needle`'s first
+/// occurrence in `src`: the offending line's structural content, not the
+/// enclosing block or the start of the file. Test inputs carry no BOM, so
+/// a source byte offset equals a diagnostic byte offset.
+fn assert_span_at(err: &crate::diagnostic::Diagnostic, src: &str, needle: &str) {
+    let expected = src
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in source"));
+    let actual = err
+        .primary
+        .expect("diagnostic has a primary span")
+        .byte_start as usize;
+    assert_eq!(actual, expected, "{err:?} should start at {needle:?}");
+}
+
 #[test]
 fn test_invalid_tables_fail() {
-    // (a) a field-form row with three cells under a two-cell header.
+    // (a) a field-form row with three cells under a two-cell header,
+    // reported at that row.
     let long_row = concat!(
         "document:\n  title: \"T\"\n\n",
         "table:\n",
@@ -660,11 +676,22 @@ fn test_invalid_tables_fail() {
     );
     let err = try_parse_diagnostics(long_row.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-META-015", "{err:?}");
+    assert_span_at(&err, long_row, "- [\"x\", \"y\", \"z\"]");
 
-    // (b, pipe form) same overlong-row rule, covered once pipe tables
-    // exist: crate::syntax::tests::test_pipe_prose_and_malformed_pipe_tables.
+    // (b) the same overlong-row rule in pipe form, reported at that row.
+    let long_pipe_row = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A | B |\n",
+        "|---|---|\n",
+        "| x | y |\n",
+        "| x | y | z |\n",
+    );
+    let err = try_parse_diagnostics(long_pipe_row.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-META-015", "{err:?}");
+    assert_span_at(&err, long_pipe_row, "| x | y | z |");
 
-    // (c) an id with a header/rows but no caption.
+    // (c) an id with a header/rows but no caption, reported at the table
+    // header line.
     let no_caption = concat!(
         "document:\n  title: \"T\"\n\n",
         "table [id: t1]:\n",
@@ -674,6 +701,7 @@ fn test_invalid_tables_fail() {
     );
     let err = try_parse_diagnostics(no_caption.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-META-017", "{err:?}");
+    assert_span_at(&err, no_caption, "table [id: t1]:");
 
     // (d) a figure without alt text still fails as today.
     let no_alt = concat!(
@@ -702,7 +730,8 @@ fn test_invalid_tables_fail() {
         other => panic!("expected table, got {other:?}"),
     }
 
-    // Edge case: a footnote in a caption or a cell fails with E-META-018.
+    // Edge case: a footnote in a caption or a cell fails with E-META-018,
+    // reported at the caption field or at the row.
     let footnote_caption = concat!(
         "document:\n  title: \"T\"\n\n",
         "table:\n",
@@ -713,6 +742,7 @@ fn test_invalid_tables_fail() {
     );
     let err = try_parse_diagnostics(footnote_caption.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-META-018", "{err:?}");
+    assert_span_at(&err, footnote_caption, "caption: \"See^[note] this\"");
 
     let footnote_cell = concat!(
         "document:\n  title: \"T\"\n\n",
@@ -724,6 +754,7 @@ fn test_invalid_tables_fail() {
     );
     let err = try_parse_diagnostics(footnote_cell.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-META-018", "{err:?}");
+    assert_span_at(&err, footnote_cell, "- [\"x^[note]\"]");
 }
 
 #[test]
@@ -977,6 +1008,7 @@ fn test_pipe_prose_and_malformed_pipe_tables() {
     );
     let err = try_parse_diagnostics(mismatch.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-PARSE-002", "{err:?}");
+    assert_span_at(&err, mismatch, "|---|---|---|");
 
     // (c) A `table:` block cannot mix `rows:` with pipe lines.
     let mixed = concat!(
@@ -990,6 +1022,8 @@ fn test_pipe_prose_and_malformed_pipe_tables() {
     );
     let err = try_parse_diagnostics(mixed.as_bytes()).unwrap_err();
     assert_eq!(err.code, "E-PARSE-002", "{err:?}");
+    assert_span_at(&err, mixed, "| y |");
+    assert!(err.message.contains("cannot mix"), "{err:?}");
 
     // Edge case: a paragraph running straight into a pipe table (no blank
     // line between them) ends before the table.

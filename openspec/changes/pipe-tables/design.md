@@ -55,14 +55,16 @@ Outside protected spans, `\|` becomes a literal `|` and does not split. Inside a
 
 ### D5. Model
 
-`TopBlock::Table` / `NodeKind::Table` / `ProjectedNode::Table` become:
+`NodeKind::Table` and `ProjectedNode::Table` become:
 
 ```text
 { id: Option<String>, caption: Option<Vec<Inline>>,
   align: Vec<ColumnAlign>, header: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>> }
 ```
 
-`ColumnAlign` is `Default | Left | Center | Right`. The block form yields `Default` for every column. Lowering parses the caption and every cell with `parse_inline_at` (which already validates links and math), rejecting footnotes with `E-META-018` ("table captions and cells cannot contain footnotes"). The four walkers named in the Context descend into the caption, header, and rows. The projection keeps alignment, because it is authored meaning.
+`TopBlock::Table` keeps raw cell text instead, with one span per line: `caption: Option<(String, SourceSpan)>`, `header: (Vec<String>, SourceSpan)`, `rows: Vec<(Vec<String>, SourceSpan)>`, plus `align` and `id`. Inline parsing happens at lowering, as it already does for a figure's caption, and every cell on a line reports its diagnostics at that line.
+
+`ColumnAlign` is `Default | Left | Center | Right`. The block form yields `Default` for every column. Lowering parses the caption and every cell with `parse_inline_at` (which already validates links and math), rejecting footnotes with `E-META-018` ("table captions and cells cannot contain footnotes"). The four walkers named in the Context descend into the caption, header, and rows. The projection keeps alignment, because it is authored meaning. Because the existing table fields change shape, every document with a table digests differently for unchanged content, so `PROJECTION_VERSION` goes from 2 to 3.
 
 ### D6. Emission
 

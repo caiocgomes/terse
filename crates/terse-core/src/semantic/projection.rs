@@ -26,7 +26,14 @@ use sha2::{Digest, Sha256};
 /// added the effective bibliography records: before it, two documents
 /// whose cited works carried different locked metadata digested
 /// identically, which called materially different papers equal.
-pub const PROJECTION_VERSION: u32 = 2;
+/// Version 3 changed the shape of existing table fields: the caption and
+/// every cell became inline content (the caption also optional), and a
+/// per-column alignment was added, so a document with any table digests
+/// differently even when its authored content is unchanged. (Adding a
+/// new node variant, such as the code block, needs no bump: no existing
+/// document contains it. Adding `numbered` to the equation node did
+/// change existing digests and should have bumped this too, but did not.)
+pub const PROJECTION_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedMetadata {
