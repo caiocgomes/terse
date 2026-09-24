@@ -445,3 +445,75 @@ fn test_projection_distinguishes_numbered_equations() {
         eqs(&unnumbered)
     );
 }
+
+/// A citation or cross-reference reachable only through a table caption
+/// or cell must be as live as one in a paragraph: the four node walkers
+/// that decide bibliography needs, citation validity, cross-reference
+/// validity, and the `.bib`'s cited set must all descend into `Table`.
+#[test]
+fn test_table_cell_citations_and_refs_are_live() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "refs:\n  robins1986: doi:10.1000/abc\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"See [@robins1986, p. 1].\"]\n",
+    );
+    let file = SourceFile::new(FileId(0), "entry.trs", src.as_bytes().to_vec()).unwrap();
+    let mut snapshot = InputSnapshot::single(file);
+    snapshot.lock = Some(locked_robins1986());
+    let (diags, plan) = compile(&snapshot);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    let module = plan.unwrap().module;
+
+    let cited = crate::semantic::collect_cited_aliases(&module);
+    assert!(cited.contains("robins1986"), "{cited:?}");
+    assert!(
+        crate::semantic::has_bibliography(&module),
+        "a citation reachable only through a table cell must still request a bibliography build"
+    );
+
+    // A cross-reference reachable only through a table cell is validated
+    // the same way one in a paragraph is: an unknown id fails.
+    let bad_ref_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"{ref: nope}\"]\n",
+    );
+    let bad_ref_file =
+        SourceFile::new(FileId(0), "entry.trs", bad_ref_src.as_bytes().to_vec()).unwrap();
+    let (bad_ref_diags, bad_ref_plan) = compile(&InputSnapshot::single(bad_ref_file));
+    assert!(bad_ref_plan.is_none(), "an unknown cross-reference in a cell must fail");
+    assert!(
+        bad_ref_diags.iter().any(|d| d.code == "E-XREF-001"),
+        "{bad_ref_diags:?}"
+    );
+
+    // The same is true for a citation or a cross-reference reachable only
+    // through the table's caption.
+    let caption_src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "refs:\n  robins1986: doi:10.1000/abc\n\n",
+        "table:\n",
+        "  caption: \"See [@robins1986, p. 1].\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"x\"]\n",
+    );
+    let caption_file =
+        SourceFile::new(FileId(0), "entry.trs", caption_src.as_bytes().to_vec()).unwrap();
+    let mut caption_snapshot = InputSnapshot::single(caption_file);
+    caption_snapshot.lock = Some(locked_robins1986());
+    let (caption_diags, caption_plan) = compile(&caption_snapshot);
+    assert!(
+        caption_diags.is_empty(),
+        "unexpected diagnostics: {caption_diags:?}"
+    );
+    let caption_cited = crate::semantic::collect_cited_aliases(&caption_plan.unwrap().module);
+    assert!(caption_cited.contains("robins1986"), "{caption_cited:?}");
+}

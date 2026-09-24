@@ -47,7 +47,13 @@ pub enum ProjectedNode {
     List { ordered: bool, start: Option<u32>, items: Vec<ProjectedListItem> },
     Equation { id: Option<String>, numbered: bool, payload: String },
     Figure { path: String, id: Option<String>, role: Option<String>, caption: Vec<Inline>, alt: String },
-    Table { id: Option<String>, caption: String, header: Vec<String>, rows: Vec<Vec<String>> },
+    Table {
+        id: Option<String>,
+        caption: Option<Vec<Inline>>,
+        align: Vec<crate::semantic::ColumnAlign>,
+        header: Vec<Vec<Inline>>,
+        rows: Vec<Vec<Vec<Inline>>>,
+    },
     TheoremLike { kind: crate::semantic::TheoremKind, title: Option<String>, id: Option<String>, body: Vec<ProjectedNode> },
     Proof { id: Option<String>, of: Option<String>, body: Vec<ProjectedNode> },
     RawTex { payload: String },
@@ -96,9 +102,16 @@ fn project_node(node: &Node) -> ProjectedNode {
             caption: caption.clone(),
             alt: alt.clone(),
         },
-        NodeKind::Table { id, caption, header, rows } => ProjectedNode::Table {
+        NodeKind::Table {
+            id,
+            caption,
+            align,
+            header,
+            rows,
+        } => ProjectedNode::Table {
             id: id.clone(),
             caption: caption.clone(),
+            align: align.clone(),
             header: header.clone(),
             rows: rows.clone(),
         },

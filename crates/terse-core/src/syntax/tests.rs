@@ -585,11 +585,18 @@ fn test_figure_table_fields_are_semantic() {
     }
 
     match &module.blocks[1].kind {
-        NodeKind::Table { id, header, rows, .. } => {
+        NodeKind::Table {
+            id,
+            header,
+            rows,
+            align,
+            ..
+        } => {
             assert_eq!(id.as_deref(), Some("costs"));
-            assert_eq!(header, &vec!["Policy".to_string(), "Cost, USD".to_string()]);
+            assert_eq!(header, &vec![vec![Inline::Text("Policy".to_string())], vec![Inline::Text("Cost, USD".to_string())]]);
             assert_eq!(rows.len(), 2);
-            assert_eq!(rows[0], vec!["Baseline".to_string(), "12".to_string()]);
+            assert_eq!(rows[0], vec![vec![Inline::Text("Baseline".to_string())], vec![Inline::Text("12".to_string())]]);
+            assert_eq!(align, &vec![crate::semantic::ColumnAlign::Default, crate::semantic::ColumnAlign::Default]);
         }
         other => panic!("expected table, got {other:?}"),
     }
@@ -609,13 +616,15 @@ fn test_missing_figure_fields_and_ragged_tables() {
     );
     assert!(try_parse_text(missing_caption.as_bytes()).is_err());
 
+    // A row longer than the header is still rejected; a shorter one is now
+    // padded rather than an error (test_invalid_tables_fail's edge case).
     let ragged_table = concat!(
         "document:\n  title: \"T\"\n\n",
         "table:\n",
         "  caption: \"C\"\n",
         "  header: [\"A\", \"B\"]\n",
         "  rows:\n",
-        "    - [\"only one\"]\n",
+        "    - [\"x\", \"y\", \"z\"]\n",
     );
     assert!(try_parse_text(ragged_table.as_bytes()).is_err());
 
@@ -636,6 +645,368 @@ fn test_missing_figure_fields_and_ragged_tables() {
         "  alt: \"Alt text\"\n",
     );
     assert!(try_parse_text(footnote_caption.as_bytes()).is_err());
+}
+
+#[test]
+fn test_invalid_tables_fail() {
+    // (a) a field-form row with three cells under a two-cell header.
+    let long_row = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\", \"B\"]\n",
+        "  rows:\n",
+        "    - [\"x\", \"y\", \"z\"]\n",
+    );
+    let err = try_parse_diagnostics(long_row.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-META-015", "{err:?}");
+
+    // (b, pipe form) same overlong-row rule, covered once pipe tables
+    // exist: crate::syntax::tests::test_pipe_prose_and_malformed_pipe_tables.
+
+    // (c) an id with a header/rows but no caption.
+    let no_caption = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table [id: t1]:\n",
+        "  header: [\"A\", \"B\"]\n",
+        "  rows:\n",
+        "    - [\"x\", \"y\"]\n",
+    );
+    let err = try_parse_diagnostics(no_caption.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-META-017", "{err:?}");
+
+    // (d) a figure without alt text still fails as today.
+    let no_alt = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "figure \"a.pdf\":\n  caption: \"A caption\"\n",
+    );
+    assert!(try_parse_text(no_alt.as_bytes()).is_err());
+
+    // Edge case: a field-form row with one cell under a two-cell header
+    // now succeeds, padded with an empty cell.
+    let short_row = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\", \"B\"]\n",
+        "  rows:\n",
+        "    - [\"only one\"]\n",
+    );
+    let module = parse_text(short_row.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { rows, .. } => {
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].len(), 2, "short row padded to header width");
+            assert_eq!(rows[0][1], Vec::<Inline>::new(), "padding cell is empty");
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // Edge case: a footnote in a caption or a cell fails with E-META-018.
+    let footnote_caption = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"See^[note] this\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"x\"]\n",
+    );
+    let err = try_parse_diagnostics(footnote_caption.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-META-018", "{err:?}");
+
+    let footnote_cell = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"x^[note]\"]\n",
+    );
+    let err = try_parse_diagnostics(footnote_cell.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-META-018", "{err:?}");
+}
+
+#[test]
+fn test_bare_pipe_table() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| Metric | Value |\n",
+        "|:--|--:|\n",
+        "| *Accuracy* | $0.97$ |\n",
+        "| Latency |\n",
+        "\n",
+        "After.\n",
+    );
+    let module = parse_text(src.as_bytes());
+    assert_eq!(module.blocks.len(), 2, "{module:?}");
+    match &module.blocks[0].kind {
+        NodeKind::Table {
+            id,
+            caption,
+            align,
+            header,
+            rows,
+        } => {
+            assert_eq!(*id, None);
+            assert_eq!(*caption, None);
+            assert_eq!(align, &vec![crate::semantic::ColumnAlign::Left, crate::semantic::ColumnAlign::Right]);
+            assert_eq!(header, &vec![vec![Inline::Text("Metric".to_string())], vec![Inline::Text("Value".to_string())]]);
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0][0], vec![Inline::Emphasis(vec![Inline::Text("Accuracy".to_string())])]);
+            assert_eq!(rows[0][1], vec![Inline::Math("0.97".to_string())]);
+            assert_eq!(rows[1], vec![vec![Inline::Text("Latency".to_string())], vec![]]);
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+    match &module.blocks[1].kind {
+        NodeKind::Paragraph { inlines } => assert_eq!(plain_text(inlines), "After."),
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+
+    // `|---|:-:|` gives [Default, Center].
+    let centered = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A | B |\n",
+        "|---|:-:|\n",
+        "| x | y |\n",
+    );
+    let module = parse_text(centered.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { align, .. } => {
+            assert_eq!(
+                align,
+                &vec![
+                    crate::semantic::ColumnAlign::Default,
+                    crate::semantic::ColumnAlign::Center
+                ]
+            );
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // A bare pipe table is accepted inside a theorem body.
+    let in_theorem = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "theorem:\n",
+        "  A statement.\n",
+        "\n",
+        "  | A | B |\n",
+        "  |---|---|\n",
+        "  | x | y |\n",
+    );
+    assert!(try_parse_text(in_theorem.as_bytes()).is_ok());
+
+    // A bare pipe table is rejected inside a list item, as the field form
+    // already is.
+    let in_list_item = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "1. Item:\n",
+        "  | A | B |\n",
+        "  |---|---|\n",
+        "  | x | y |\n",
+    );
+    assert!(try_parse_text(in_list_item.as_bytes()).is_err());
+}
+
+#[test]
+fn test_pipe_cell_splitting_protects_math_and_code() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A | B | C | D | E |\n",
+        "|---|---|---|---|---|\n",
+        "| $|x|$ | `a|b` | a \\| b | $5 | $10 |\n",
+    );
+    let module = parse_text(src.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { rows, .. } => {
+            assert_eq!(rows.len(), 1);
+            let row = &rows[0];
+            assert_eq!(row[0], vec![Inline::Math("|x|".to_string())]);
+            assert_eq!(row[1], vec![Inline::Code("a|b".to_string())]);
+            assert_eq!(row[2], vec![Inline::Text("a | b".to_string())]);
+            assert_eq!(row[3], vec![Inline::Text("$5".to_string())]);
+            assert_eq!(row[4], vec![Inline::Text("$10".to_string())]);
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // `` | `a\|b` | `` yields Code("a|b"): `\|` also reads as `|` inside a
+    // code span, for GFM compatibility.
+    let code_escape = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A |\n",
+        "|---|\n",
+        "| `a\\|b` |\n",
+    );
+    let module = parse_text(code_escape.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { rows, .. } => {
+            assert_eq!(rows[0][0], vec![Inline::Code("a|b".to_string())])
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // `| $\|x\|$ |` yields Math("\|x\|"): inside math, `\|` is left as
+    // written (it is TeX's double bar), not unescaped.
+    let math_bar = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A |\n",
+        "|---|\n",
+        "| $\\|x\\|$ |\n",
+    );
+    let module = parse_text(math_bar.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { rows, .. } => {
+            assert_eq!(rows[0][0], vec![Inline::Math("\\|x\\|".to_string())])
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // `| \(a|b\) |` is one math cell.
+    let paren_math = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A |\n",
+        "|---|\n",
+        "| \\(a|b\\) |\n",
+    );
+    let module = parse_text(paren_math.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { rows, .. } => {
+            assert_eq!(rows[0][0], vec![Inline::Math("a|b".to_string())])
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // A lone backtick protects nothing at the splitter level (covered
+    // directly, without going through inline parsing, by
+    // `blocks::pipe_row_splitter_tests::unmatched_protected_span_protects_nothing_and_splits_normally`,
+    // which asserts `| ` | x |` splits into two cells `["`", "x"]`, not
+    // one swallowed cell). Once that lone backtick reaches inline
+    // parsing as its own cell's content, it fails the same way a lone
+    // backtick in a paragraph already does: an unterminated code span.
+    let lone_backtick = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| A | B |\n",
+        "|---|---|\n",
+        "| ` | x |\n",
+    );
+    let err = try_parse_diagnostics(lone_backtick.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-PARSE-050", "{err:?}");
+}
+
+#[test]
+fn test_captioned_pipe_table_block() {
+    let src = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table [id: tbl-results]:\n",
+        "  caption: \"Summary of *results*\"\n",
+        "  | Metric | Value |\n",
+        "  |---|---|\n",
+        "  | Accuracy | 0.97 |\n",
+    );
+    let module = parse_text(src.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table {
+            id,
+            caption,
+            header,
+            rows,
+            ..
+        } => {
+            assert_eq!(id.as_deref(), Some("tbl-results"));
+            assert_eq!(
+                caption,
+                &Some(vec![
+                    Inline::Text("Summary of ".to_string()),
+                    Inline::Emphasis(vec![Inline::Text("results".to_string())])
+                ])
+            );
+            assert_eq!(header, &vec![vec![Inline::Text("Metric".to_string())], vec![Inline::Text("Value".to_string())]]);
+            assert_eq!(rows.len(), 1);
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+
+    // The field-form caption becomes inline too.
+    let field_caption = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"A *b*\"\n",
+        "  header: [\"H\"]\n",
+        "  rows:\n",
+        "    - [\"x\"]\n",
+    );
+    let module = parse_text(field_caption.as_bytes());
+    match &module.blocks[0].kind {
+        NodeKind::Table { caption, .. } => {
+            assert_eq!(
+                caption,
+                &Some(vec![
+                    Inline::Text("A ".to_string()),
+                    Inline::Emphasis(vec![Inline::Text("b".to_string())])
+                ])
+            );
+        }
+        other => panic!("expected table, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_pipe_prose_and_malformed_pipe_tables() {
+    // (a) A `|` line with no following delimiter row stays prose.
+    let prose = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| not a table\n",
+        "just prose\n",
+    );
+    let module = parse_text(prose.as_bytes());
+    assert_eq!(module.blocks.len(), 1);
+    match &module.blocks[0].kind {
+        NodeKind::Paragraph { inlines } => {
+            assert_eq!(plain_text(inlines), "| not a table just prose")
+        }
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+
+    // (b) A header/delimiter cell-count mismatch is rejected at the
+    // delimiter line.
+    let mismatch = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "| a | b |\n",
+        "|---|---|---|\n",
+    );
+    let err = try_parse_diagnostics(mismatch.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-PARSE-002", "{err:?}");
+
+    // (c) A `table:` block cannot mix `rows:` with pipe lines.
+    let mixed = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "table:\n",
+        "  caption: \"C\"\n",
+        "  header: [\"A\"]\n",
+        "  rows:\n",
+        "    - [\"x\"]\n",
+        "  | y |\n",
+    );
+    let err = try_parse_diagnostics(mixed.as_bytes()).unwrap_err();
+    assert_eq!(err.code, "E-PARSE-002", "{err:?}");
+
+    // Edge case: a paragraph running straight into a pipe table (no blank
+    // line between them) ends before the table.
+    let running_in = concat!(
+        "document:\n  title: \"T\"\n\n",
+        "Lead-in text.\n",
+        "| a | b |\n",
+        "|---|---|\n",
+        "| x | y |\n",
+    );
+    let module = parse_text(running_in.as_bytes());
+    assert_eq!(module.blocks.len(), 2, "{module:?}");
+    match &module.blocks[0].kind {
+        NodeKind::Paragraph { inlines } => assert_eq!(plain_text(inlines), "Lead-in text."),
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+    assert!(matches!(module.blocks[1].kind, NodeKind::Table { .. }));
 }
 
 #[test]

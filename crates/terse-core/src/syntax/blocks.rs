@@ -76,6 +76,22 @@ pub struct RawMetadata {
     pub keywords: Vec<String>,
 }
 
+/// A pipe-table delimiter cell's column alignment, or `Default` for a
+/// field-form table (which has no delimiter row) and for a plain `---`
+/// delimiter cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnAlign {
+    Default,
+    Left,
+    Center,
+    Right,
+}
+
+/// A raw (not yet inline-parsed) table header or row: its cell texts
+/// plus one span for the whole line, shared by both table syntaxes and
+/// every stage between parsing and `finish_table`.
+type TableCells = (Vec<String>, SourceSpan);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TheoremKind {
     Theorem,
@@ -142,11 +158,18 @@ pub enum TopBlock {
         alt: String,
         span: SourceSpan,
     },
+    /// `header` and each of `rows` carry raw, not-yet-inline-parsed cell
+    /// text plus one span for their whole line: every cell on a header or
+    /// row line shares that line's diagnostic location, the same
+    /// granularity a figure's `caption` field has (one span for the whole
+    /// field, not one per character). Lowering parses each cell with
+    /// `parse_inline_at`, using that shared span.
     Table {
         id: Option<String>,
-        caption: String,
-        header: Vec<String>,
-        rows: Vec<Vec<String>>,
+        caption: Option<(String, SourceSpan)>,
+        align: Vec<ColumnAlign>,
+        header: TableCells,
+        rows: Vec<TableCells>,
         span: SourceSpan,
     },
     TheoremLike {
@@ -383,6 +406,25 @@ fn parse_block_sequence<'a>(
         // may contain (installation-step snippets are the common case).
         if let Some(len) = crate::syntax::opaque::fence_len(content) {
             let (block, next_i) = parse_code_block(lines, source, i, len, file_id, base)?;
+            blocks.push(block);
+            i = next_i;
+            continue;
+        }
+
+        // A bare pipe table, like `table:`, is not content a list item's
+        // continuation accepts (D1); unlike `$$`/`math:`, whose openers
+        // are unambiguous keywords, a `|` line with no delimiter row
+        // below it is not a table at all, so it falls through to prose.
+        if pipe_table_opens(lines, i) {
+            if context == BlockContext::ListItem {
+                return Err(malformed(
+                    file_id,
+                    base,
+                    line,
+                    "a bare pipe table is not supported inside a list item",
+                ));
+            }
+            let (block, next_i) = parse_pipe_table(lines, i, file_id, base)?;
             blocks.push(block);
             i = next_i;
             continue;
@@ -672,6 +714,12 @@ fn consume_paragraph<'a>(
             break;
         }
         if crate::syntax::opaque::fence_len(content).is_some() {
+            break;
+        }
+        // A `|` line by itself does not end a running paragraph (it stays
+        // prose, D1's "pipe-looking prose" case): only a genuine opener,
+        // confirmed by the delimiter-row lookahead, does.
+        if pipe_table_opens(lines, i) {
             break;
         }
         if starts_with_reserved_word(content).is_some() {
@@ -1654,10 +1702,16 @@ fn parse_table<'a>(
 
     let body_indent = header.indent + 1;
     let mut i = start + 1;
-    let mut caption = None;
-    let mut table_header: Option<Vec<String>> = None;
-    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut caption: Option<(String, SourceSpan)> = None;
+    let mut table_header: Option<TableCells> = None;
+    let mut align: Option<Vec<ColumnAlign>> = None;
+    let mut rows: Vec<TableCells> = Vec::new();
     let mut seen = HashSet::new();
+    // Distinguishes the field form (`header:`/`rows:`) from a pipe body:
+    // once one appears, the other is a located mixing error, and a
+    // second pipe-table opener (which would silently discard the first)
+    // is rejected the same way `header:`/`rows:` already reject a repeat.
+    let mut body_kind: Option<&'static str> = None;
 
     while i < lines.len() {
         let line = &lines[i];
@@ -1674,19 +1728,66 @@ fn parse_table<'a>(
 
         if let Some(rest) = line.content.strip_prefix("caption:") {
             require_unseen(&mut seen, "caption", line, file_id, base)?;
-            caption = Some(parse_scalar(rest.trim_start()).ok_or_else(|| {
-                malformed(file_id, base, line, "expected a scalar value for 'caption'")
-            })?);
-            i += 1;
+            let (text, next_i) = parse_field_text(lines, i, rest, body_indent, file_id, base)?;
+            let span = mk_span(
+                file_id,
+                base,
+                line.content_byte_start,
+                lines[next_i - 1].byte_end,
+            );
+            caption = Some((text, span));
+            i = next_i;
         } else if let Some(rest) = line.content.strip_prefix("header:") {
+            if let Some(other) = body_kind {
+                if other == "pipe" {
+                    return Err(malformed(
+                        file_id,
+                        base,
+                        line,
+                        "a table body cannot mix pipe-table lines with 'header:'/'rows:' fields",
+                    ));
+                }
+            }
+            body_kind = Some("field");
             require_unseen(&mut seen, "header", line, file_id, base)?;
-            table_header = Some(parse_string_list(rest.trim_start()).ok_or_else(|| {
+            let cells = parse_string_list(rest.trim_start()).ok_or_else(|| {
                 malformed(file_id, base, line, "expected a list value for 'header'")
-            })?);
+            })?;
+            let span = mk_span(file_id, base, line.content_byte_start, line.byte_end);
+            table_header = Some((cells, span));
             i += 1;
         } else if line.content.trim_end() == "rows:" {
+            if let Some(other) = body_kind {
+                if other == "pipe" {
+                    return Err(malformed(
+                        file_id,
+                        base,
+                        line,
+                        "a table body cannot mix pipe-table lines with 'header:'/'rows:' fields",
+                    ));
+                }
+            }
+            body_kind = Some("field");
             require_unseen(&mut seen, "rows", line, file_id, base)?;
             let (parsed_rows, next_i) = parse_table_rows(lines, i, file_id, base)?;
+            rows = parsed_rows;
+            i = next_i;
+        } else if line.content.starts_with('|') {
+            if body_kind == Some("field") {
+                return Err(malformed(
+                    file_id,
+                    base,
+                    line,
+                    "a table body cannot mix pipe-table lines with 'header:'/'rows:' fields",
+                ));
+            }
+            if body_kind == Some("pipe") {
+                return Err(malformed(file_id, base, line, "a table body can only have one pipe table"));
+            }
+            body_kind = Some("pipe");
+            let (parsed_header, parsed_align, parsed_rows, next_i) = parse_pipe_table_body(lines, i, file_id, base)?;
+            table_header = Some(parsed_header);
+            align = Some(parsed_align);
             rows = parsed_rows;
             i = next_i;
         } else {
@@ -1694,13 +1795,6 @@ fn parse_table<'a>(
         }
     }
 
-    let caption = caption.ok_or_else(|| {
-        Diagnostic::error(
-            "E-META-012",
-            "table requires a 'caption'",
-            mk_span(file_id, base, header.content_byte_start, header.byte_end),
-        )
-    })?;
     let table_header = table_header.ok_or_else(|| {
         Diagnostic::error(
             "E-META-013",
@@ -1708,39 +1802,339 @@ fn parse_table<'a>(
             mk_span(file_id, base, header.content_byte_start, header.byte_end),
         )
     })?;
+    let align = align.unwrap_or_else(|| vec![ColumnAlign::Default; table_header.0.len()]);
+    let error_span = mk_span(file_id, base, header.content_byte_start, header.byte_end);
+    let end = if i > start + 1 {
+        lines[i - 1].byte_end
+    } else {
+        header.byte_end
+    };
+    let span = mk_span(file_id, base, header.content_byte_start, end);
+    Ok((finish_table(id, caption, align, table_header, rows, error_span, span)?, i))
+}
+
+/// Shared row-shape validation and construction: rejects a table with no
+/// data row (`E-META-014`) or an overlong row (`E-META-015`, since
+/// dropping a cell to fit would lose authored content, but a short row
+/// padded with empty cells does not), and rejects an id with no caption
+/// (`E-META-017`). Used by the field form, a bare pipe table, and a
+/// `table [id: ...]:` block's pipe body, so all three enforce the same
+/// shape. `error_span` locates the table-level errors (`E-META-014`,
+/// `E-META-017`); an overlong row's error uses that row's own span.
+fn finish_table(
+    id: Option<String>,
+    caption: Option<(String, SourceSpan)>,
+    align: Vec<ColumnAlign>,
+    header: TableCells,
+    mut rows: Vec<TableCells>,
+    error_span: SourceSpan,
+    span: SourceSpan,
+) -> Result<TopBlock, Diagnostic> {
     if rows.is_empty() {
         return Err(Diagnostic::error(
             "E-META-014",
             "table requires at least one data row",
-            mk_span(file_id, base, header.content_byte_start, header.byte_end),
+            error_span,
         ));
     }
-    for row in &rows {
-        if row.len() != table_header.len() {
+    for (row, row_span) in &mut rows {
+        if row.len() > header.0.len() {
             return Err(Diagnostic::error(
                 "E-META-015",
                 format!(
                     "table row has {} cells but the header has {}",
                     row.len(),
-                    table_header.len()
+                    header.0.len()
                 ),
-                mk_span(file_id, base, header.content_byte_start, header.byte_end),
+                *row_span,
             ));
         }
+        while row.len() < header.0.len() {
+            row.push(String::new());
+        }
+    }
+    if id.is_some() && caption.is_none() {
+        return Err(Diagnostic::error(
+            "E-META-017",
+            "a table id needs a caption: an unnumbered table has nothing to reference",
+            error_span,
+        ));
+    }
+    Ok(TopBlock::Table {
+        id,
+        caption,
+        align,
+        header,
+        rows,
+        span,
+    })
+}
+
+/// Whether `lines[i]` opens a pipe table: its content starts with `|`,
+/// and the next line, at the same indent, is a valid delimiter row. A
+/// `|` line not followed by a delimiter row stays prose (D1); a header/
+/// delimiter cell-count mismatch is a hard error reported once parsing
+/// actually commits to the table, not a reason to fall back to prose.
+fn pipe_table_opens(lines: &[StructLine<'_>], i: usize) -> bool {
+    let Some(header) = lines.get(i) else {
+        return false;
+    };
+    if header.is_blank || !header.content.starts_with('|') {
+        return false;
+    }
+    let Some(delim) = lines.get(i + 1) else {
+        return false;
+    };
+    !delim.is_blank && delim.indent == header.indent && parse_delimiter_row(delim.content).is_some()
+}
+
+/// Recognizes a pipe-table delimiter row: optional leading and trailing
+/// `|`, cells made only of an optional `:`, one or more `-`, and an
+/// optional `:`, with surrounding spaces allowed. Returns each cell's
+/// alignment in order, or `None` if the line is not a delimiter row at
+/// all (as opposed to one with the wrong cell count for its header,
+/// which the caller reports as a located error rather than treating as
+/// "not a delimiter row").
+fn parse_delimiter_row(content: &str) -> Option<Vec<ColumnAlign>> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let inner = trimmed.strip_prefix('|').unwrap_or(trimmed);
+    let inner = inner.strip_suffix('|').unwrap_or(inner);
+    if inner.trim().is_empty() {
+        return None;
+    }
+    let mut aligns = Vec::new();
+    for cell in inner.split('|') {
+        let cell = cell.trim();
+        if cell.is_empty() {
+            return None;
+        }
+        let left = cell.starts_with(':');
+        let right = cell.ends_with(':');
+        let dashes = cell.trim_start_matches(':').trim_end_matches(':');
+        if dashes.is_empty() || !dashes.chars().all(|c| c == '-') {
+            return None;
+        }
+        aligns.push(match (left, right) {
+            (true, true) => ColumnAlign::Center,
+            (true, false) => ColumnAlign::Left,
+            (false, true) => ColumnAlign::Right,
+            (false, false) => ColumnAlign::Default,
+        });
+    }
+    Some(aligns)
+}
+
+/// Splits a pipe-table row's structural content into raw (not yet
+/// inline-parsed) cell text, protecting three span kinds shared with the
+/// inline parser so the two can never disagree (D2): a backtick-delimited
+/// code span, `$...$` math via the exact rule [`crate::syntax::inlines::
+/// find_dollar_closer`] uses, and `\(...\)` math. Outside a protected
+/// span, `\|` becomes a literal `|` and does not split; inside a code
+/// span, `\|` also becomes `|` (GFM); inside math, `\|` is left exactly
+/// as written, where it is TeX's double bar. An unmatched protected span
+/// (a lone backtick, an unterminated `$` or `\(`) protects nothing past
+/// its own opener and is split normally. One leading and one trailing
+/// unprotected `|` (the table syntax's own delimiters, not part of any
+/// cell) are dropped; an interior empty cell, such as the second of
+/// `| a | |`, is kept. Every returned cell is trimmed.
+fn split_pipe_row(content: &str) -> Vec<String> {
+    let trimmed = content.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    let n = chars.len();
+    let mut pieces: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut i = 0usize;
+    while i < n {
+        match chars[i] {
+            '\\' if i + 1 < n && chars[i + 1] == '|' => {
+                buf.push('|');
+                i += 2;
+            }
+            '`' => {
+                let run_start = i;
+                let mut len = 0usize;
+                while i < n && chars[i] == '`' {
+                    len += 1;
+                    i += 1;
+                }
+                let content_start = i;
+                let mut close = None;
+                let mut j = i;
+                while j < n {
+                    if chars[j] == '`' {
+                        let run_j = j;
+                        let mut rlen = 0usize;
+                        while j < n && chars[j] == '`' {
+                            rlen += 1;
+                            j += 1;
+                        }
+                        if rlen == len {
+                            close = Some((run_j, j));
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+                match close {
+                    Some((close_start, close_end)) => {
+                        buf.extend(chars[run_start..content_start].iter().copied());
+                        let mut k = content_start;
+                        while k < close_start {
+                            if chars[k] == '\\' && k + 1 < close_start && chars[k + 1] == '|' {
+                                buf.push('|');
+                                k += 2;
+                            } else {
+                                buf.push(chars[k]);
+                                k += 1;
+                            }
+                        }
+                        buf.extend(chars[close_start..close_end].iter().copied());
+                        i = close_end;
+                    }
+                    None => {
+                        // No matching run: the backtick(s) protect nothing.
+                        buf.extend(chars[run_start..content_start].iter().copied());
+                        i = content_start;
+                    }
+                }
+            }
+            '$' => match crate::syntax::inlines::find_dollar_closer(&chars, i) {
+                Some(close) => {
+                    buf.extend(chars[i..=close].iter().copied());
+                    i = close + 1;
+                }
+                None => {
+                    buf.push('$');
+                    i += 1;
+                }
+            },
+            '\\' if i + 1 < n && chars[i + 1] == '(' => {
+                let math_start = i;
+                let mut j = i + 2;
+                let mut close = None;
+                while j + 1 < n {
+                    if chars[j] == '\\' && chars[j + 1] == ')' {
+                        close = Some(j + 1);
+                        break;
+                    }
+                    j += 1;
+                }
+                match close {
+                    Some(close_end) => {
+                        buf.extend(chars[math_start..=close_end].iter().copied());
+                        i = close_end + 1;
+                    }
+                    None => {
+                        buf.push(chars[i]);
+                        i += 1;
+                    }
+                }
+            }
+            '|' => {
+                pieces.push(std::mem::take(&mut buf));
+                i += 1;
+            }
+            c => {
+                buf.push(c);
+                i += 1;
+            }
+        }
+    }
+    pieces.push(buf);
+
+    if pieces.len() > 1 && trimmed.starts_with('|') && pieces[0].trim().is_empty() {
+        pieces.remove(0);
+    }
+    if pieces.len() > 1
+        && trimmed.ends_with('|')
+        && pieces.last().is_some_and(|p| p.trim().is_empty())
+    {
+        pieces.pop();
+    }
+    pieces.into_iter().map(|p| p.trim().to_string()).collect()
+}
+
+/// Parses a pipe table's header, delimiter, and body rows starting at
+/// `lines[start]` (the caller has already confirmed, via
+/// [`pipe_table_opens`], that this line opens one). Continues while
+/// later lines are non-blank, at the same indent as the header, and
+/// start with `|`.
+fn parse_pipe_table_body<'a>(
+    lines: &[StructLine<'a>],
+    start: usize,
+    file_id: FileId,
+    base: u32,
+) -> Result<(TableCells, Vec<ColumnAlign>, Vec<TableCells>, usize), Diagnostic> {
+    let header_line = &lines[start];
+    let indent = header_line.indent;
+    let header_cells = split_pipe_row(header_line.content);
+    let header_span = mk_span(
+        file_id,
+        base,
+        header_line.content_byte_start,
+        header_line.byte_end,
+    );
+
+    let delim_line = &lines[start + 1];
+    let align =
+        parse_delimiter_row(delim_line.content).expect("caller confirmed the next line is a delimiter row");
+    if align.len() != header_cells.len() {
+        return Err(Diagnostic::error(
+            "E-PARSE-002",
+            format!(
+                "pipe-table delimiter row has {} cells but the header has {}",
+                align.len(),
+                header_cells.len()
+            ),
+            mk_span(
+                file_id,
+                base,
+                delim_line.content_byte_start,
+                delim_line.byte_end,
+            ),
+        ));
     }
 
-    let end = if i > start + 1 { lines[i - 1].byte_end } else { header.byte_end };
-    let span = mk_span(file_id, base, header.content_byte_start, end);
-    Ok((
-        TopBlock::Table {
-            id,
-            caption,
-            header: table_header,
-            rows,
-            span,
-        },
-        i,
-    ))
+    let mut i = start + 2;
+    let mut rows = Vec::new();
+    while i < lines.len() {
+        let line = &lines[i];
+        if line.is_blank || line.indent != indent || !line.content.starts_with('|') {
+            break;
+        }
+        let cells = split_pipe_row(line.content);
+        let span = mk_span(file_id, base, line.content_byte_start, line.byte_end);
+        rows.push((cells, span));
+        i += 1;
+    }
+
+    Ok(((header_cells, header_span), align, rows, i))
+}
+
+/// A bare (captionless) pipe table at module/nested scope: `id` and
+/// `caption` are always `None`, since a table with no `table [id: ...]:`
+/// header has no id to carry.
+fn parse_pipe_table<'a>(
+    lines: &[StructLine<'a>],
+    start: usize,
+    file_id: FileId,
+    base: u32,
+) -> Result<(TopBlock, usize), Diagnostic> {
+    let (header, align, rows, next_i) = parse_pipe_table_body(lines, start, file_id, base)?;
+    let header_line = &lines[start];
+    let error_span = mk_span(
+        file_id,
+        base,
+        header_line.content_byte_start,
+        header_line.byte_end,
+    );
+    let end = lines[next_i - 1].byte_end;
+    let span = mk_span(file_id, base, header_line.content_byte_start, end);
+    Ok((finish_table(None, None, align, header, rows, error_span, span)?, next_i))
 }
 
 fn parse_table_rows<'a>(
@@ -1748,7 +2142,7 @@ fn parse_table_rows<'a>(
     start: usize,
     file_id: FileId,
     base: u32,
-) -> Result<(Vec<Vec<String>>, usize), Diagnostic> {
+) -> Result<(Vec<TableCells>, usize), Diagnostic> {
     let header_line = &lines[start];
     let body_indent = header_line.indent + 1;
     let mut i = start + 1;
@@ -1774,7 +2168,8 @@ fn parse_table_rows<'a>(
         if cells.is_empty() {
             return Err(malformed(file_id, base, line, "table rows cannot be empty"));
         }
-        rows.push(cells);
+        let span = mk_span(file_id, base, line.content_byte_start, line.byte_end);
+        rows.push((cells, span));
         i += 1;
     }
     Ok((rows, i))
@@ -2041,4 +2436,51 @@ fn malformed(file_id: FileId, base: u32, line: &StructLine<'_>, msg: &str) -> Di
 
 fn mk_span(file_id: FileId, base: u32, start: u32, end: u32) -> SourceSpan {
     SourceSpan::new(file_id, base + start, base + end)
+}
+
+#[cfg(test)]
+mod pipe_row_splitter_tests {
+    use super::split_pipe_row;
+
+    #[test]
+    fn splits_on_unprotected_pipes_dropping_edge_pipes() {
+        assert_eq!(split_pipe_row("| a | b |"), vec!["a", "b"]);
+        assert_eq!(split_pipe_row("a | b"), vec!["a", "b"]);
+        // An interior empty cell (not the edge markers) is kept.
+        assert_eq!(split_pipe_row("| a | |"), vec!["a", ""]);
+    }
+
+    #[test]
+    fn escaped_pipe_outside_any_span_is_literal() {
+        assert_eq!(split_pipe_row(r"| a \| b | c |"), vec!["a | b", "c"]);
+    }
+
+    #[test]
+    fn code_span_protects_its_pipe_and_unescapes_backslash_pipe() {
+        assert_eq!(split_pipe_row("| `a|b` |"), vec!["`a|b`"]);
+        assert_eq!(split_pipe_row(r"| `a\|b` |"), vec!["`a|b`"]);
+    }
+
+    #[test]
+    fn dollar_math_protects_its_pipe_and_keeps_escaped_bar_as_written() {
+        assert_eq!(split_pipe_row("| $|x|$ | y |"), vec!["$|x|$", "y"]);
+        assert_eq!(split_pipe_row(r"| $\|x\|$ |"), vec![r"$\|x\|$"]);
+    }
+
+    #[test]
+    fn paren_math_protects_its_pipe() {
+        assert_eq!(split_pipe_row(r"| \(a|b\) |"), vec![r"\(a|b\)"]);
+    }
+
+    #[test]
+    fn unmatched_protected_span_protects_nothing_and_splits_normally() {
+        // A lone backtick has no closing run anywhere in the row: it does
+        // not swallow the rest of the row as a code span. The `|` after
+        // it still splits, giving two cells, not one.
+        assert_eq!(split_pipe_row("| ` | x |"), vec!["`", "x"]);
+        // Likewise an unterminated `$` (no valid closer) and an
+        // unterminated `\(` (no `\)`).
+        assert_eq!(split_pipe_row("| $5 | $10 |"), vec!["$5", "$10"]);
+        assert_eq!(split_pipe_row(r"| \(a | b |"), vec![r"\(a", "b"]);
+    }
 }

@@ -7,8 +7,8 @@ pub mod escape;
 pub mod source_map;
 
 use crate::semantic::{
-    build_symbol_table, has_bibliography, Citation, CiteItem, DocumentMetadata, ListItem, Node, NodeKind,
-    ParsedModule, SymbolKind, SymbolTable, TheoremKind,
+    build_symbol_table, has_bibliography, Citation, CiteItem, ColumnAlign, DocumentMetadata,
+    ListItem, Node, NodeKind, ParsedModule, SymbolKind, SymbolTable, TheoremKind,
 };
 use crate::syntax::inlines::Inline;
 use crate::theme::ResolvedTheme;
@@ -141,24 +141,47 @@ fn render_node(node: &Node, symbols: &SymbolTable, out: &mut String) {
         NodeKind::Table {
             id,
             caption,
+            align,
             header,
             rows,
         } => {
-            let col_spec = "l".repeat(header.len());
-            out.push_str("\\begin{table}\n\\TerseFigureAlign\n");
+            let col_spec: String = align
+                .iter()
+                .map(|a| match a {
+                    ColumnAlign::Center => 'c',
+                    ColumnAlign::Right => 'r',
+                    ColumnAlign::Default | ColumnAlign::Left => 'l',
+                })
+                .collect();
+            // A captioned table is an unchanged numbered float. One with
+            // no caption cannot have an id (the parser enforces this,
+            // D4/E-META-017) and renders in place instead, through
+            // `TerseTableHere`: no float, no counter, no `\caption`, but
+            // the same theme alignment, padding, rules, and header
+            // styling, since those macros live in the style either way.
+            let env = if caption.is_some() {
+                "table"
+            } else {
+                "TerseTableHere"
+            };
+            out.push_str(&format!("\\begin{{{env}}}\n\\TerseFigureAlign\n"));
             out.push_str(&format!("\\begin{{tabular}}{{{col_spec}}}\n\\toprule\n"));
-            out.push_str(&render_table_header_row(header));
+            out.push_str(&render_table_header_row(header, symbols));
             out.push_str(" \\\\\n\\midrule\n");
             for row in rows {
-                out.push_str(&render_table_row(row));
+                out.push_str(&render_table_row(row, symbols));
                 out.push_str(" \\\\\n");
             }
             out.push_str("\\bottomrule\n\\end{tabular}\n");
-            out.push_str(&format!("\\caption{{{}}}\n", escape::escape_text(caption)));
+            if let Some(caption) = caption {
+                out.push_str("\\caption{");
+                render_inlines(caption, symbols, out);
+                out.push_str("}\n");
+            }
             if let Some(id) = id {
                 out.push_str(&format!("\\label{{{id}}}\n"));
             }
-            out.push_str("\\end{table}\n");
+            out.push_str(&format!("\\end{{{env}}}\n"));
         }
         NodeKind::TheoremLike { kind, title, id, body } => {
             let env = theorem_environment(*kind);
@@ -255,10 +278,14 @@ fn render_code_block(language: Option<&str>, code: &str, out: &mut String) {
     out.push_str("\\end{TerseCode}\n");
 }
 
-fn render_table_row(cells: &[String]) -> String {
+fn render_table_row(cells: &[Vec<Inline>], symbols: &SymbolTable) -> String {
     cells
         .iter()
-        .map(|c| escape::escape_text(c))
+        .map(|c| {
+            let mut cell_out = String::new();
+            render_inlines(c, symbols, &mut cell_out);
+            cell_out
+        })
         .collect::<Vec<_>>()
         .join(" & ")
 }
@@ -267,10 +294,14 @@ fn render_table_row(cells: &[String]) -> String {
 /// `\textbf`: each cell is its own group in a `tabular`, so a row-level
 /// font switch would only reach the first column. The macro name is fixed,
 /// so these bytes are the same under every theme.
-fn render_table_header_row(cells: &[String]) -> String {
+fn render_table_header_row(cells: &[Vec<Inline>], symbols: &SymbolTable) -> String {
     cells
         .iter()
-        .map(|c| format!("\\TerseTableHeaderCell{{{}}}", escape::escape_text(c)))
+        .map(|c| {
+            let mut cell_out = String::new();
+            render_inlines(c, symbols, &mut cell_out);
+            format!("\\TerseTableHeaderCell{{{cell_out}}}")
+        })
         .collect::<Vec<_>>()
         .join(" & ")
 }
@@ -909,9 +940,15 @@ columns=fullflexible, keepspaces=true, showstringspaces=false, upquote=true, bre
             )
         })
         .collect();
+    // `TerseTableHere` is LaTeX's own `center` definition with the
+    // theme's figure alignment in place of `\centering`, so a table with
+    // no caption renders where it is written, with list spacing, no
+    // float, and no counter, while still sharing every other table
+    // style (padding, rules, header cells) a captioned table gets.
     let table_setup = format!(
         "\\renewcommand{{\\arraystretch}}{{{padding}}}\n\
-\\newcommand{{\\TerseTableHeaderCell}}[1]{{{header}}}\n{rules}",
+\\newcommand{{\\TerseTableHeaderCell}}[1]{{{header}}}\n{rules}\
+\\newenvironment{{TerseTableHere}}{{\\trivlist\\TerseFigureAlign\\item\\relax}}{{\\endtrivlist}}\n",
         padding = theme.table_padding,
         header = if theme.table_header == "plain" { "#1" } else { "\\textbf{#1}" },
         // `booktabs` is always loaded; the `plain` choice maps its rules
@@ -1101,6 +1138,78 @@ columns=fullflexible, keepspaces=true, showstringspaces=false, upquote=true, bre
 
         let body = body_of(concat!("document:\n  title: \"T\"\n\n", "```\nz\n```\n"));
         assert!(body.contains("\\begin{TerseCode}\nz\n\\end{TerseCode}"), "{body}");
+    }
+
+    #[test]
+    fn test_captionless_table_is_in_place() {
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "table [id: tbl-a]:\n",
+            "  caption: \"A\"\n",
+            "  | H |\n",
+            "  |---|\n",
+            "  | x |\n",
+            "\n",
+            "| H |\n",
+            "|---|\n",
+            "| y |\n",
+            "\n",
+            "table [id: tbl-b]:\n",
+            "  caption: \"B\"\n",
+            "  | H |\n",
+            "  |---|\n",
+            "  | z |\n",
+        ));
+        let a = body.find("\\begin{table}").expect("first captioned table");
+        let bare = body
+            .find("\\begin{TerseTableHere}")
+            .expect("captionless table");
+        let b_table = body[bare..]
+            .find("\\begin{table}")
+            .map(|i| bare + i)
+            .expect("second captioned table");
+        assert!(a < bare && bare < b_table, "{body}");
+
+        let bare_end = body.find("\\end{TerseTableHere}").expect("captionless table closes");
+        let bare_block = &body[bare..bare_end];
+        assert!(!bare_block.contains("\\caption"), "{bare_block}");
+        assert!(!bare_block.contains("\\label"), "{bare_block}");
+
+        let a_end = body.find("\\end{table}").expect("first table closes");
+        let a_block = &body[a..a_end];
+        assert!(a_block.contains("\\caption{A}"), "{a_block}");
+        assert!(a_block.contains("\\label{tbl-a}"), "{a_block}");
+
+        let b_end = body[b_table..]
+            .find("\\end{table}")
+            .map(|i| b_table + i)
+            .expect("second table closes");
+        let b_block = &body[b_table..b_end];
+        assert!(b_block.contains("\\caption{B}"), "{b_block}");
+        assert!(b_block.contains("\\label{tbl-b}"), "{b_block}");
+
+        let style = generate_style(&theme::academic(), &[], None, false);
+        assert!(
+            style.contains("\\newenvironment{TerseTableHere}{\\trivlist\\TerseFigureAlign\\item\\relax}{\\endtrivlist}"),
+            "{style}"
+        );
+    }
+
+    #[test]
+    fn test_pipe_table_alignment_and_inline_cells() {
+        let body = body_of(concat!(
+            "document:\n  title: \"T\"\n\n",
+            "| **Name** | B | C |\n",
+            "|:--|:-:|--:|\n",
+            "| x | y | $\\alpha$ |\n",
+        ));
+        assert!(body.contains("\\begin{tabular}{lcr}"), "{body}");
+        assert!(
+            body.contains("\\TerseTableHeaderCell{\\textbf{Name}}"),
+            "{body}"
+        );
+        assert!(body.contains("\\(\\alpha\\)"), "{body}");
+        assert!(!body.contains("\\$\\textbackslash"), "{body}");
     }
 
     #[test]

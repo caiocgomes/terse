@@ -311,6 +311,107 @@ fn test_dollar_display_does_not_consume_equation_number() {
 
 #[test]
 #[ignore = "requires a local XeLaTeX distribution"]
+fn test_equation_numbering_follows_delimiter() {
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir("equation-numbering-follows-delimiter");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        concat!(
+            "document:\n  title: \"Numbering\"\n\n",
+            "math:\n  a = 1\n\n",
+            "$$ b = 2 $$\n\n",
+            "math [id: eq-c]:\n  c = 3\n\n",
+            "See REFC{ref: eq-c}.\n",
+        ),
+    )
+    .unwrap();
+
+    let code = terse_cli::run(
+        ["terse", "build", "--require-pdf", "--theme", "academic"],
+        &tmp,
+    );
+    assert_eq!(code, 0);
+    let text = crate::common::pdf::extract_text(&tmp.join("build/academic/paper.pdf"));
+    assert!(
+        text.contains("(1)"),
+        "the unlabeled math: equation must be numbered:\n{text}"
+    );
+    assert!(
+        text.contains("(2)"),
+        "the labeled math: equation must be numbered 2:\n{text}"
+    );
+    assert!(
+        !text.contains("(3)"),
+        "the $$ display must not consume a number:\n{text}"
+    );
+    assert!(text.contains("REFC2"), "eq-c must be number 2:\n{text}");
+}
+
+#[test]
+#[ignore = "requires a local XeLaTeX distribution"]
+fn test_captionless_table_does_not_consume_a_number() {
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _engine_guard = crate::common::ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir("captionless-table-does-not-consume-a-number");
+    fs::write(
+        tmp.join("terse.toml"),
+        "format-version = 1\n\n[project]\nentry = \"paper.trs\"\noutput = \"build\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.join("paper.trs"),
+        concat!(
+            "document:\n  title: \"Table numbering\"\n\n",
+            "table [id: tbl-a]:\n",
+            "  caption: \"First\"\n",
+            "  | H |\n",
+            "  |---|\n",
+            "  | x |\n",
+            "\n",
+            "| H |\n",
+            "|---|\n",
+            "| y |\n",
+            "\n",
+            "table [id: tbl-b]:\n",
+            "  caption: \"Second\"\n",
+            "  | H |\n",
+            "  |---|\n",
+            "  | z |\n",
+            "\n",
+            "See REFA{ref: tbl-a} and REFB{ref: tbl-b}.\n",
+        ),
+    )
+    .unwrap();
+
+    let code = terse_cli::run(
+        ["terse", "build", "--require-pdf", "--theme", "academic"],
+        &tmp,
+    );
+    assert_eq!(code, 0);
+    let text = crate::common::pdf::extract_text(&tmp.join("build/academic/paper.pdf"));
+    assert!(text.contains("REFA1"), "tbl-a must be number 1:\n{text}");
+    assert!(
+        text.contains("REFB2"),
+        "tbl-b must be number 2, not 3:\n{text}"
+    );
+    assert!(
+        !text.contains("Table 3"),
+        "the bare pipe table must not consume a float number:\n{text}"
+    );
+}
+
+#[test]
+#[ignore = "requires a local XeLaTeX distribution"]
 fn test_code_block_is_inert_in_pdf() {
     let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _engine_guard = crate::common::ENGINE_LOCK

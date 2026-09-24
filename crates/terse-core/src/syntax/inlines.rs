@@ -71,6 +71,35 @@ fn push_plain(inlines: &[Inline], out: &mut String) {
     }
 }
 
+/// Pandoc's rule for `$...$`: the opener at `chars[pos]` (which must be
+/// `$`) must be followed by a non-space, and the closer must follow a
+/// non-space and must not precede a digit. Only the next unescaped `$` is
+/// a candidate closer (TeX forbids a bare `$` inside inline math), so a
+/// price before real math never pairs with it. Returns the closer's
+/// index, or `None` when the `$` is literal text (a price, a lone sign).
+/// A crate-level function (not just a `Parser` method) so the pipe-table
+/// cell splitter (`blocks.rs`) can use the exact same rule the inline
+/// parser does, and the two can never disagree about where `$...$` ends.
+pub(crate) fn find_dollar_closer(chars: &[char], pos: usize) -> Option<usize> {
+    match chars.get(pos + 1) {
+        Some(c) if !c.is_whitespace() => {}
+        _ => return None,
+    }
+    let mut i = pos + 1;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 2,
+            '$' => {
+                let prev = chars[i - 1];
+                let next_is_digit = matches!(chars.get(i + 1), Some(c) if c.is_ascii_digit());
+                return (!prev.is_whitespace() && !next_is_digit).then_some(i);
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 pub fn parse_inline(input: &str) -> Result<Vec<Inline>, InlineError> {
     let mut parser = Parser {
         chars: input.chars().collect(),
@@ -321,24 +350,7 @@ impl Parser {
     /// math never pairs with it. Returns the closer's index, or `None` when
     /// the `$` is literal text (a price, a lone sign).
     fn find_dollar_closer(&self) -> Option<usize> {
-        match self.peek_at(self.pos + 1) {
-            Some(c) if !c.is_whitespace() => {}
-            _ => return None,
-        }
-        let mut i = self.pos + 1;
-        while i < self.chars.len() {
-            match self.chars[i] {
-                '\\' => i += 2,
-                '$' => {
-                    let prev = self.chars[i - 1];
-                    let next_is_digit =
-                        matches!(self.peek_at(i + 1), Some(c) if c.is_ascii_digit());
-                    return (!prev.is_whitespace() && !next_is_digit).then_some(i);
-                }
-                _ => i += 1,
-            }
-        }
-        None
+        find_dollar_closer(&self.chars, self.pos)
     }
 
     fn parse_footnote(&mut self, out: &mut Vec<Inline>) -> Result<(), InlineError> {

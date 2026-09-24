@@ -8,7 +8,7 @@ use crate::source::{FileId, SourceSpan};
 use crate::syntax::blocks::{RawAffiliation, RawListItem, RefEntry, TopBlock};
 use crate::syntax::inlines::{self, Inline};
 
-pub use crate::syntax::blocks::{RefKind, TheoremKind};
+pub use crate::syntax::blocks::{ColumnAlign, RefKind, TheoremKind};
 pub use crate::syntax::inlines::{Citation, CiteItem, Locator, LocatorKind};
 
 const SUPPORTED_LOCALES: &[&str] = &["en", "pt-BR"];
@@ -112,9 +112,10 @@ pub enum NodeKind {
     },
     Table {
         id: Option<String>,
-        caption: String,
-        header: Vec<String>,
-        rows: Vec<Vec<String>>,
+        caption: Option<Vec<Inline>>,
+        align: Vec<ColumnAlign>,
+        header: Vec<Vec<Inline>>,
+        rows: Vec<Vec<Vec<Inline>>>,
     },
     TheoremLike {
         kind: TheoremKind,
@@ -274,11 +275,14 @@ fn contains_citation(nodes: &[Node]) -> bool {
             .iter()
             .any(|item| inlines_contain_citation(&item.inlines) || contains_citation(&item.continuation)),
         NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => contains_citation(body),
-        NodeKind::Equation { .. }
-        | NodeKind::Table { .. }
-        | NodeKind::RawTex { .. }
-        | NodeKind::CodeBlock { .. }
-        | NodeKind::Bibliography => false,
+        NodeKind::Table { caption, header, rows, .. } => {
+            caption.as_deref().is_some_and(inlines_contain_citation)
+                || header.iter().any(|cell| inlines_contain_citation(cell))
+                || rows.iter().any(|row| row.iter().any(|cell| inlines_contain_citation(cell)))
+        }
+        NodeKind::Equation { .. } | NodeKind::RawTex { .. } | NodeKind::CodeBlock { .. } | NodeKind::Bibliography => {
+            false
+        }
     })
 }
 
@@ -460,8 +464,25 @@ fn validate_cross_refs(nodes: &[Node], symbols: &SymbolTable) -> Result<(), Diag
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 validate_cross_refs(body, symbols)?;
             }
+            NodeKind::Table {
+                caption,
+                header,
+                rows,
+                ..
+            } => {
+                if let Some(caption) = caption {
+                    check_inline_refs(caption, node.span, symbols)?;
+                }
+                for cell in header {
+                    check_inline_refs(cell, node.span, symbols)?;
+                }
+                for row in rows {
+                    for cell in row {
+                        check_inline_refs(cell, node.span, symbols)?;
+                    }
+                }
+            }
             NodeKind::Equation { .. }
-            | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
             | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
@@ -546,8 +567,25 @@ fn check_citations(
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 check_citations(body, known_aliases, sources)?;
             }
+            NodeKind::Table {
+                caption,
+                header,
+                rows,
+                ..
+            } => {
+                if let Some(caption) = caption {
+                    check_inline_citations(caption, node.span, known_aliases, sources)?;
+                }
+                for cell in header {
+                    check_inline_citations(cell, node.span, known_aliases, sources)?;
+                }
+                for row in rows {
+                    for cell in row {
+                        check_inline_citations(cell, node.span, known_aliases, sources)?;
+                    }
+                }
+            }
             NodeKind::Equation { .. }
-            | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
             | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
@@ -681,8 +719,25 @@ fn collect_cited_in_nodes(nodes: &[Node], out: &mut std::collections::BTreeSet<S
             NodeKind::TheoremLike { body, .. } | NodeKind::Proof { body, .. } => {
                 collect_cited_in_nodes(body, out);
             }
+            NodeKind::Table {
+                caption,
+                header,
+                rows,
+                ..
+            } => {
+                if let Some(caption) = caption {
+                    collect_cited_in_inlines(caption, out);
+                }
+                for cell in header {
+                    collect_cited_in_inlines(cell, out);
+                }
+                for row in rows {
+                    for cell in row {
+                        collect_cited_in_inlines(cell, out);
+                    }
+                }
+            }
             NodeKind::Equation { .. }
-            | NodeKind::Table { .. }
             | NodeKind::RawTex { .. }
             | NodeKind::CodeBlock { .. }
             | NodeKind::Bibliography => {}
@@ -778,18 +833,54 @@ fn lower_block(block: TopBlock) -> Result<Node, Diagnostic> {
         TopBlock::Table {
             id,
             caption,
+            align,
             header,
             rows,
             span,
-        } => Ok(Node {
-            kind: NodeKind::Table {
-                id,
-                caption,
-                header,
-                rows,
-            },
-            span,
-        }),
+        } => {
+            let caption_inlines = caption
+                .map(|(text, caption_span)| {
+                    let inlines = parse_inline_at(&text, caption_span)?;
+                    if contains_footnote(&inlines) {
+                        return Err(Diagnostic::error(
+                            "E-META-018",
+                            "table captions and cells cannot contain footnotes",
+                            caption_span,
+                        ));
+                    }
+                    Ok(inlines)
+                })
+                .transpose()?;
+            let lower_cells =
+                |(cells, span): (Vec<String>, SourceSpan)| -> Result<Vec<Vec<Inline>>, Diagnostic> {
+                    cells
+                        .into_iter()
+                        .map(|cell| {
+                            let inlines = parse_inline_at(&cell, span)?;
+                            if contains_footnote(&inlines) {
+                                return Err(Diagnostic::error(
+                                    "E-META-018",
+                                    "table captions and cells cannot contain footnotes",
+                                    span,
+                                ));
+                            }
+                            Ok(inlines)
+                        })
+                        .collect()
+                };
+            let header_inlines = lower_cells(header)?;
+            let rows_inlines = rows.into_iter().map(lower_cells).collect::<Result<Vec<_>, _>>()?;
+            Ok(Node {
+                kind: NodeKind::Table {
+                    id,
+                    caption: caption_inlines,
+                    align,
+                    header: header_inlines,
+                    rows: rows_inlines,
+                },
+                span,
+            })
+        }
         TopBlock::TheoremLike {
             kind,
             title,

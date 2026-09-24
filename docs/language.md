@@ -24,7 +24,38 @@ diagnostic error — metadata placement is checked, not inferred.
   targets are validated against the id namespace; adjacency is never used
   to infer which theorem a proof belongs to.
 - Figures (caption, plain-text alt, optional `role: wide`) and tables
-  (caption, header row, body rows — rectangular, no spans).
+  (header row, body rows — rectangular, no spans). A table is written
+  either as a `table [id: ...]:` block (`header:`/`rows:` fields, or a
+  pipe body at the block's indent, never both) or as a bare pipe table:
+  a header row, a GFM-shape delimiter row, and body rows, all starting
+  with `|` at the same structural indent —
+  ```
+  | Metric   |  Value |
+  |:---------|-------:|
+  | Accuracy | $0.97$ |
+  ```
+  A `|` line only becomes a table when the *next* line is a valid
+  delimiter row (optional leading/trailing `|`, cells of an optional
+  `:`, one or more `-`, and an optional `:`); otherwise it stays prose,
+  so an existing paragraph starting with `|` keeps its meaning. Once a
+  delimiter row is recognized, though, a header/delimiter cell-count
+  mismatch is a located error, not a silent fallback to prose. The
+  delimiter sets each column's alignment (`:---` left, `:---:` center,
+  `---:` right, `---` default); the field form has no delimiter row, so
+  every one of its columns is left-aligned. Cells split on `|`, except
+  inside a backtick code span, `$...$` math, and `\(...\)` math — so
+  `| $|x|$ |` is one cell. Outside those spans `\|` is a literal pipe;
+  inside a code span `\|` also reads as `|` (GFM); inside math it is
+  left exactly as written, where it is TeX's own double bar. A data row
+  shorter than the header is padded with empty cells; a longer one is
+  rejected. A table caption and every cell carry inline content
+  (emphasis, links, math, citations, cross-references — footnotes
+  excepted), in both syntaxes. The caption is optional: a captioned
+  table is a numbered float with `\caption`, and a captionless one
+  renders where it is written, unnumbered, not floating, and cannot
+  carry an id (there is no number to reference). Pipe tables are
+  accepted at module scope, in theorem/proof bodies, and are not
+  supported inside a list item, the same as the field form.
 - Restricted math (`math:` blocks and inline `\(...\)`) against a closed,
   versioned command/environment allowlist — see `crates/terse-core/src/
   syntax/math.rs`. Execution primitives (`\input`, `\write18`, `\csname`,
