@@ -5,6 +5,8 @@ members = ["crates/terse-core", "crates/terse-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/caiocgomes/terse"
 # The toolchain this project is actually built and tested with, matching
 # `rust-toolchain.toml`, the release image and CI. It was `1.80` until
 # `close-verification-gaps` checked: that version cannot build the

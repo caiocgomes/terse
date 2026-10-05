@@ -3,6 +3,9 @@ name = "terse-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Effect-free compiler library for Terse: parsing, semantic analysis, and LaTeX generation"
 
 [dependencies]
 serde = { workspace = true }

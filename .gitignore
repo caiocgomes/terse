@@ -10,3 +10,6 @@ managed-prefix*.tar.gz
 
 # graphify knowledge-graph output (derived)
 graphify-out/
+
+# Local assistant notes, not project content
+/tasks/

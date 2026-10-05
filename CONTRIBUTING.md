@@ -2,13 +2,16 @@
 
 ## Workflow
 
-This implementation follows the OpenSpec changes in `openspec/changes/`
-(`design.md`, `specs/*/spec.md`, `tests.md`, `tasks.md` in each): `terse` for
-the compiler and `managed-toolchain` for toolchain resolution, `doctor`, and
-managed TeX Live provisioning. The synced main specs live in
-`openspec/specs/`. Read the relevant spec and the test plan before changing
-behavior in that area; each `tasks.md`'s checkboxes track implementation
-status per group.
+Behavior is specified with OpenSpec. The current capability specs live in
+`openspec/specs/` and are the reference for what the compiler must do. Each
+change to that behavior is proposed in its own directory under
+`openspec/changes/` (`proposal.md`, `design.md`, `specs/*/spec.md` deltas,
+`tests.md`, `tasks.md`) and moved to `openspec/changes/archive/` once it is
+implemented and its deltas are merged into `openspec/specs/`. The original
+compiler (`archive/2026-09-22-terse/`) and the managed TeX toolchain
+(`archive/2026-09-20-managed-toolchain/`) are there too. Read the relevant
+spec and test plan before changing behavior in that area, and open a change
+for anything that alters what a spec requires.
 
 ## Building and testing
 
@@ -53,3 +56,11 @@ this codebase — audit new code that touches artifact generation for it.
 
 Include the specific `cargo test --locked <name>` output for the tests
 your change adds or affects, not just a full-suite pass/fail line.
+
+## License
+
+Terse is licensed under the Apache License, Version 2.0. Unless you
+explicitly state otherwise, any contribution you intentionally submit for
+inclusion in this project is licensed under the same terms, as set out in
+section 5 of the [license](LICENSE), without any additional terms or
+conditions.

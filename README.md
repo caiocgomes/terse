@@ -5,8 +5,45 @@ readable, self-contained LaTeX projects. Themes are a separate style layer,
 so the same authored content can render as, for example, an academic paper
 or a corporate-styled document without touching a single sentence.
 
-See `openspec/changes/terse/` for the full design, capability specs, and
-task checklist this implementation follows.
+```
+document:
+  title: "A Note on Sums"
+  authors:
+    - name: "Ada Lovelace"
+  abstract:
+    A short example of a Terse document.
+
+# Result [id: sec-result]
+
+Prose stays readable: *emphasis*, **strong**, `code`, a footnote^[like
+this one], and inline math such as $e^{i\pi} + 1 = 0$.
+
+math [id: eq-sum]:
+  \sum_{k=1}^{n} k = \frac{n(n+1)}{2}
+
+theorem [id: thm-sum]:
+  Equation {ref: eq-sum} holds for every $n \geq 1$.
+
+proof [of: thm-sum]:
+  By induction on $n$.
+
+| Method | Error     |
+|:-------|----------:|
+| Euler  | $10^{-2}$ |
+| RK4    | $10^{-5}$ |
+```
+
+`terse build` turns this into a `paper.tex` you can read and edit, a
+`terse-style.sty` that carries every presentation decision, and, when a
+TeX toolchain is available, a PDF. Without a theme the output is the plain
+LaTeX `article` look; a theme changes only what it declares.
+
+## Status
+
+Terse is pre-1.0 (version 0.1.0). The `.trs` language, the theme format,
+and the generated LaTeX can still change between releases. Markdown input
+(`.md` files compiled through the same pipeline) is being designed in
+`openspec/changes/compile-markdown/` and is not implemented yet.
 
 ## Prerequisites
 
@@ -20,6 +57,8 @@ task checklist this implementation follows.
 ## Install
 
 ```sh
+git clone https://github.com/caiocgomes/terse
+cd terse
 cargo install --locked --path crates/terse-cli
 terse toolchain install   # optional: managed TeX Live 2025 for PDF output
 terse doctor              # check the toolchain, with fix commands per OS
@@ -86,9 +125,8 @@ See `docs/` for a fuller guide to each area.
 - `scripts/release-checks.sh` — runs both lanes plus the traceability audit,
   the same checks CI runs before a release.
 
-CI and local development run the same scripts; there is no separate hosted-only
-validation path. The workflows in `.github/workflows/` have not run yet, since
-the repository has no remote; they are configured, not proven.
+CI (`.github/workflows/ci.yml`) and local development run the same scripts;
+there is no separate hosted-only validation path.
 
 ## Project layout
 
@@ -98,11 +136,17 @@ the repository has no remote; they are configured, not proven.
 - `crates/terse-cli` — the `terse` executable: project discovery, the
   XeLaTeX/Biber process runner, transactional output publication, reference
   resolution, watch mode, export, and the command-line interface.
-- `openspec/changes/terse/` — the design, specs, and task checklist.
+- `openspec/specs/` — the current capability specs, the reference for what
+  the compiler is required to do.
+- `openspec/changes/` — proposed changes (proposal, design, delta specs,
+  test plan, tasks); merged ones are kept under `openspec/changes/archive/`.
 - `docs/` — user-facing documentation.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). To report a security issue, follow
+[`SECURITY.md`](SECURITY.md) instead of opening a public issue.
 
 ## License
 
-Not yet chosen. See `openspec/changes/terse/tasks.md` task 26.5 — this is
-deliberately left open pending the author's decision and does not block any
-other work.
+Licensed under the [Apache License, Version 2.0](LICENSE).
