@@ -65,7 +65,7 @@ jobs:
       - run: docker run --rm -v "$PWD":/work -w /work -e CARGO_HOME=/work/.docker-cargo-home terse-toolchain:ci cargo fetch --locked
       # Acceptance networking is disabled after provisioning: no test in this
       # lane may make a real network call. `scripts/test-tex.sh` preflights
-      # with `terse doctor`, runs the smoke build, then the ignored e2e suite.
+      # with `terse doctor`, runs the smoke build, then every ignored test.
       - run: docker run --rm --network none -v "$PWD":/work -w /work -e CARGO_HOME=/work/.docker-cargo-home -e CARGO_TARGET_DIR=/work/.docker-target -e CARGO_NET_OFFLINE=true terse-toolchain:ci scripts/test-tex.sh
       # The relocatable archive used by offline-install tests and by anyone
       # reproducing the environment without the repository.

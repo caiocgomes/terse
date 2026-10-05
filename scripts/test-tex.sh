@@ -32,4 +32,4 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 echo "test-tex.sh: real XeLaTeX smoke build succeeded"
 
-cargo test --locked -p terse-cli --test e2e -- --ignored
+cargo test --locked -p terse-cli -- --ignored

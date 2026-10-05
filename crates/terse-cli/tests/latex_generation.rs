@@ -127,6 +127,7 @@ fn test_auto_vs_required_pdf_without_engine() {
 }
 
 #[test]
+#[ignore = "requires a local XeLaTeX distribution"]
 fn test_subprocess_arguments_are_not_shell_text() {
     let _guard = PATH_LOCK.lock().unwrap();
     let tmp = tempdir("shell-sensitive $(); & name");
@@ -721,6 +722,7 @@ fn test_unnumbered_heading_reference_works() {
 }
 
 #[test]
+#[ignore = "requires a local XeLaTeX distribution"]
 fn test_missing_glyph_is_build_failure() {
     // The theme's Latin fonts (Latin Modern / TeX Gyre) have no CJK
     // glyphs, so xelatex reports a real "Missing character" warning even

@@ -226,6 +226,7 @@ fn test_managed_toolchain_provisions_ci_image() {
 /// name that directory as the probable cause, delete exactly it, report
 /// the action, re-probe, and still exit `1` because the stand-in keeps
 /// hanging.
+#[cfg(unix)]
 #[test]
 #[ignore = "needs an installed managed TeX Live 2025 prefix; two real 10 s probe timeouts"]
 fn test_doctor_detects_corrupt_par_cache_and_fixes_it() {

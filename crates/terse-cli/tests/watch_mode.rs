@@ -209,6 +209,7 @@ fn test_missing_dependency_creation_is_detected_through_real_watcher() {
 }
 
 #[test]
+#[ignore = "requires a local XeLaTeX distribution"]
 fn test_watch_keeps_last_good_pdf_after_syntax_error() {
     let _guard = watch_lock();
     let root = tempdir("keep-last-good");

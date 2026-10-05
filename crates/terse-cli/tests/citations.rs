@@ -543,6 +543,7 @@ mod refs_resolve_command {
 /// looking TeX). Locked offline (a hand-authored `references.lock`, no
 /// network) so this stays a real-compile test, not a resolution test.
 #[test]
+#[ignore = "requires a local XeLaTeX/Biber distribution"]
 fn test_unicode_text_and_bibliography_compile() {
     let _engine_guard = ENGINE_LOCK.lock().unwrap();
     let tmp = tempdir_named("bib-e2e-compile");
