@@ -366,6 +366,29 @@ fn wait_for_watcher_ready(root: &Path, watch: &dependencies::FsWatch) -> Vec<Pat
     leftover
 }
 
+/// Pairs each path reported during the readiness handshake with its bytes
+/// at this moment (`None` for a missing file or a directory).
+fn record_startup_events(paths: Vec<PathBuf>) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    paths
+        .into_iter()
+        .map(|p| {
+            let bytes = std::fs::read(&p).ok();
+            (p, bytes)
+        })
+        .collect()
+}
+
+/// The recorded paths whose bytes differ now: edited, deleted, or created
+/// since [`record_startup_events`] ran. The rest describe exactly what the
+/// initial build read and are not input changes.
+fn changed_since_startup(recorded: Vec<(PathBuf, Option<Vec<u8>>)>) -> Vec<PathBuf> {
+    recorded
+        .into_iter()
+        .filter(|(p, bytes)| std::fs::read(p).ok() != *bytes)
+        .map(|(p, _)| p)
+        .collect()
+}
+
 fn root_relative_join(root: &Path, base_dir: &Path, relative: &str) -> Option<String> {
     let candidate = base_dir.join(relative);
     let rel = candidate.strip_prefix(root).ok()?;
@@ -459,7 +482,15 @@ pub fn run_with_toolchain(
     // the watcher itself reports it -- a genuine readiness handshake,
     // bounded so a truly broken watcher fails fast instead of hanging
     // watch forever.
-    let mut leftover_events = wait_for_watcher_ready(&watch_root, &watch);
+    //
+    // Everything reported before the sentinel was written before the
+    // initial build reads its inputs. FSEvents can also replay writes made
+    // just before the stream existed (observed on GitHub's macOS runners:
+    // the project's own terse.toml and paper.trs), which the initial build
+    // reads anyway. Recording each path's bytes now lets the drain below
+    // keep only the ones that changed after this point, so a replay is not
+    // mistaken for an input change while a real edit still is.
+    let startup_events = record_startup_events(wait_for_watcher_ready(&watch_root, &watch));
 
     scheduler.start_initial_build();
     let outcome = run_attempt(&project, &entry_path, options, engine, runner);
@@ -469,10 +500,12 @@ pub fn run_with_toolchain(
     // Drain anything that had already queued up (from the readiness
     // handshake, or from an edit landing during the initial build itself)
     // before invoking `on_attempt`, now that `tracked` actually exists to
-    // judge relevance against. This must never be silently discarded --
-    // an earlier version of this function did exactly that during the
-    // readiness wait, which lost a real edit whenever one raced with
-    // watcher startup.
+    // judge relevance against. A real edit must never be silently
+    // discarded -- an earlier version of this function dropped every event
+    // seen during the readiness wait, which lost a real edit whenever one
+    // raced with watcher startup. Only handshake events whose file still
+    // holds the bytes recorded before the build are dropped.
+    let mut leftover_events = changed_since_startup(startup_events);
     while let Ok(changed) = watch.events.try_recv() {
         leftover_events.push(changed);
     }
@@ -673,6 +706,40 @@ mod tests {
             published.contains("Edited Mid-Build"),
             "the successor must process the edit that superseded its predecessor, got:\n{published}"
         );
+    }
+
+    #[test]
+    fn test_startup_events_for_unchanged_files_are_dropped() {
+        // FSEvents can replay writes made just before the stream existed
+        // (observed on GitHub's macOS runners: Create/Modify for the
+        // project's own terse.toml and paper.trs). Such an event describes
+        // bytes the initial build already read, so it is not an input
+        // change; a real edit, a deletion, or a creation still is.
+        let root = tempdir("startup-replay");
+        let unchanged = root.join("terse.toml");
+        let edited = root.join("paper.trs");
+        let deleted = root.join("old.trs");
+        let created = root.join("new.trs");
+        std::fs::write(&unchanged, "format-version = 1\n").unwrap();
+        std::fs::write(&edited, "Before.\n").unwrap();
+        std::fs::write(&deleted, "Gone soon.\n").unwrap();
+
+        let recorded = record_startup_events(vec![
+            root.clone(),
+            unchanged.clone(),
+            edited.clone(),
+            deleted.clone(),
+            created.clone(),
+        ]);
+        std::fs::write(&edited, "After.\n").unwrap();
+        std::fs::remove_file(&deleted).unwrap();
+        std::fs::write(&created, "New.\n").unwrap();
+
+        let mut changed = changed_since_startup(recorded);
+        changed.sort();
+        let mut expected = vec![edited, deleted, created];
+        expected.sort();
+        assert_eq!(changed, expected);
     }
 
     #[allow(dead_code)]
