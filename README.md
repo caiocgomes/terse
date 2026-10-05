@@ -114,7 +114,8 @@ See `docs/` for a fuller guide to each area.
 ## Testing
 
 - `scripts/test-engine-free.sh` — the required lane (`cargo test --workspace
-  --locked`), no TeX installation needed. Runs on every supported OS.
+  --locked`), no TeX installation needed. Runs on Linux and macOS;
+  Windows support is future work.
 - `scripts/test-tex.sh` — the heavy lane: `terse doctor` as preflight, a real
   XeLaTeX/Biber smoke build, plus every `--ignored` test. Needs a working
   toolchain (managed or on `PATH`), or run it inside the pinned environment
